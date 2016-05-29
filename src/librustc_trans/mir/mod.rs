@@ -228,8 +228,7 @@ pub fn trans_mir<'blk, 'tcx: 'blk>(fcx: &'blk FunctionContext<'blk, 'tcx>) {
         let block = BasicBlock(block.llbb);
         // Unreachable block
         if !visited.contains(bb.index()) {
-            block.delete();
-        } else if block.pred_iter().count() == 0 {
+            debug!("trans_mir: block {:?} was not visited", bb);
             block.delete();
         }
     }
@@ -431,7 +430,6 @@ fn arg_value_refs<'bcx, 'tcx>(bcx: &BlockAndBuilder<'bcx, 'tcx>,
 mod analyze;
 mod block;
 mod constant;
-mod drop;
 mod lvalue;
 mod operand;
 mod rvalue;
