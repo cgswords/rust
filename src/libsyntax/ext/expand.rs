@@ -11,7 +11,6 @@
 use ast::{Block, Crate, DeclKind, PatKind};
 use ast::{Local, Ident, Mac_, Name, SpannedIdent};
 use ast::{MacStmtStyle, Mrk, Stmt, StmtKind, ItemKind};
-use ast::TokenTree;
 use ast;
 use ext::mtwt;
 use ext::build::AstBuilder;
@@ -32,6 +31,7 @@ use util::small_vector::SmallVector;
 use visit;
 use visit::Visitor;
 use std_inject;
+use tokenstream::{TokenTree};
 
 use std::collections::HashSet;
 
