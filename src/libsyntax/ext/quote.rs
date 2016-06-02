@@ -549,7 +549,7 @@ fn mk_name(cx: &ExtCtxt, sp: Span, ident: ast::Ident) -> P<ast::Expr> {
 }
 
 fn mk_tt_path(cx: &ExtCtxt, sp: Span, name: &str) -> P<ast::Expr> {
-    let idents = vec!(id_ext("syntax"), id_ext("ast"), id_ext("TokenTree"), id_ext(name));
+    let idents = vec!(id_ext("syntax"), id_ext("tokenstream"), id_ext("TokenTree"), id_ext(name));
     cx.expr_path(cx.path_global(sp, idents))
 }
 
@@ -778,7 +778,7 @@ fn statements_mk_tt(cx: &ExtCtxt, tt: &TokenTree, matcher: bool) -> Vec<ast::Stm
             };
             let e_op_idents = vec![
                 id_ext("syntax"),
-                id_ext("ast"),
+                id_ext("tokenstream"),
                 id_ext("KleeneOp"),
                 id_ext(e_op),
             ];
@@ -788,7 +788,9 @@ fn statements_mk_tt(cx: &ExtCtxt, tt: &TokenTree, matcher: bool) -> Vec<ast::Stm
                               cx.field_imm(sp, id_ext("op"), e_op),
                               cx.field_imm(sp, id_ext("num_captures"),
                                                cx.expr_usize(sp, seq.num_captures))];
-            let seq_path = vec![id_ext("syntax"), id_ext("ast"), id_ext("SequenceRepetition")];
+            let seq_path = vec![id_ext("syntax"),
+                                id_ext("tokenstream"),
+                                id_ext("SequenceRepetition")];
             let e_seq_struct = cx.expr_struct(sp, cx.path_global(sp, seq_path), fields);
             let e_rc_new = cx.expr_call_global(sp, vec![id_ext("std"),
                                                         id_ext("rc"),

@@ -184,7 +184,8 @@ pub trait IdentMacroExpander {
 }
 
 pub type IdentMacroExpanderFn =
-    for<'cx> fn(&'cx mut ExtCtxt, Span, ast::Ident, Vec<tokenstream::TokenTree>) -> Box<MacResult+'cx>;
+    for<'cx> fn(&'cx mut ExtCtxt, Span, ast::Ident, Vec<tokenstream::TokenTree>)
+                -> Box<MacResult+'cx>;
 
 impl<F> IdentMacroExpander for F
     where F : for<'cx> Fn(&'cx mut ExtCtxt, Span, ast::Ident,

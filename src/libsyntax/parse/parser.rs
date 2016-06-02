@@ -2722,7 +2722,8 @@ impl<'a> Parser<'a> {
     /// repetition token (+ or *).
     pub fn parse_sep_and_kleene_op(&mut self)
                                    -> PResult<'a, (Option<token::Token>, tokenstream::KleeneOp)> {
-        fn parse_kleene_op<'a>(parser: &mut Parser<'a>) -> PResult<'a,  Option<tokenstream::KleeneOp>> {
+        fn parse_kleene_op<'a>(parser: &mut Parser<'a>)
+                               -> PResult<'a,  Option<tokenstream::KleeneOp>> {
             match parser.token {
                 token::BinOp(token::Star) => {
                     parser.bump();

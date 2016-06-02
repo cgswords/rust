@@ -671,7 +671,8 @@ impl FirstSets {
 
                             assert!(first.maybe_empty);
                             first.add_all(subfirst);
-                            if subfirst.maybe_empty || seq_rep.op == tokenstream::KleeneOp::ZeroOrMore {
+                            if subfirst.maybe_empty ||
+                               seq_rep.op == tokenstream::KleeneOp::ZeroOrMore {
                                 // continue scanning for more first
                                 // tokens, but also make sure we
                                 // restore empty-tracking state
