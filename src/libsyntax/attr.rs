@@ -30,6 +30,7 @@ use ptr::P;
 
 use std::cell::{RefCell, Cell};
 use std::collections::HashSet;
+use std::collections::HashMap;
 
 thread_local! {
     static USED_ATTRS: RefCell<Vec<u64>> = RefCell::new(Vec::new())
@@ -72,6 +73,13 @@ pub trait AttrMetaMethods {
     /// Gets a list of inner meta items from a list MetaItem type.
     fn meta_item_list(&self) -> Option<&[P<MetaItem>]>;
 
+    fn is_name(&self)   -> bool;
+    fn is_assign(&self) -> bool;
+    fn is_list(&self)   -> bool;
+
+    fn maybe_word(&self)   -> Option<InternedString>;
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)>;
+
     fn span(&self) -> Span;
 }
 
@@ -90,7 +98,19 @@ impl AttrMetaMethods for Attribute {
     fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
         self.node.value.meta_item_list()
     }
+
+    fn is_name(&self)   -> bool { self.meta().is_name() }
+    fn is_assign(&self) -> bool { self.meta().is_assign() }
+    fn is_list(&self)   -> bool { self.meta().is_list() }
+    
+    fn maybe_word(&self)   -> Option<InternedString> { self.meta().maybe_word() }
+
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
+      self.meta().maybe_assign() 
+    }
+
     fn span(&self) -> Span { self.meta().span }
+    
 }
 
 impl AttrMetaMethods for MetaItem {
@@ -120,6 +140,44 @@ impl AttrMetaMethods for MetaItem {
             _ => None
         }
     }
+
+    fn is_name(&self) -> bool { 
+      match self.node
+        { MetaItemKind::Word(_) => true
+        , _                     => false
+        }
+    }
+    
+    fn is_assign(&self) -> bool { 
+      match self.node
+        { MetaItemKind::NameValue(_,_) => true
+        , _                            => false
+        }
+    }
+    
+    fn is_list(&self) -> bool { 
+      match self.node
+        { MetaItemKind::List(_,_) => true
+        , _                       => false
+        }
+    }
+
+    fn maybe_word(&self) -> Option<InternedString> {
+      match self.node {
+        MetaItemKind::Word(ref n) => Some((*n).clone()),
+        _ => None
+      }
+    }
+
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
+      let name = self.name();
+      let val = self.value_str();
+      match val
+        { Some(v) => Some((name, v)) 
+        , _       => None 
+        }
+    }
+
     fn span(&self) -> Span { self.span }
 }
 
@@ -130,6 +188,14 @@ impl AttrMetaMethods for P<MetaItem> {
     fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
         (**self).meta_item_list()
     }
+    fn is_name(&self)   -> bool { (**self).is_name() }
+    fn is_assign(&self) -> bool { (**self).is_assign() }
+    fn is_list(&self)   -> bool { (**self).is_list() }
+
+    fn maybe_word(&self)   -> Option<InternedString> { (**self).maybe_word() }
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> 
+    { (**self).maybe_assign() }
+
     fn span(&self) -> Span { (**self).span() }
 }
 
@@ -190,6 +256,29 @@ pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
     P(dummy_spanned(MetaItemKind::Word(name)))
 }
 
+//-------------------------------------------------------------------------------------------------------
+fn to_assign_map(diagnostic: &Handler, metas : &[P<MetaItem>]) -> Option<HashMap<String, InternedString>> {
+  let mut metamap : HashMap<String, InternedString> = HashMap::new();
+
+  for meta in metas {
+    if let Some((name, lit)) = meta.maybe_assign() {
+      let name = (&*name).to_string();
+      if metamap.contains_key(&name) {
+        diagnostic.span_err(meta.span, &format!("multiple '{}' items", meta.name())); 
+        return None;
+      }
+      metamap.insert(name, lit);
+    } else {
+      diagnostic.span_err(meta.span, 
+                          &format!("Incorrect meta item format '{}'", meta.name()));
+      return None;
+    }
+  }
+
+  Some(metamap)
+}
+
+//-------------------------------------------------------------------------------------------------------
 thread_local! { static NEXT_ATTR_ID: Cell<usize> = Cell::new(0) }
 
 pub fn mk_attr_id() -> AttrId {
@@ -332,27 +421,33 @@ pub enum InlineAttr {
 /// Determine what `#[inline]` attribute is present in `attrs`, if any.
 pub fn find_inline_attr(diagnostic: Option<&Handler>, attrs: &[Attribute]) -> InlineAttr {
     attrs.iter().fold(InlineAttr::None, |ia,attr| {
-        match attr.node.value.node {
-            MetaItemKind::Word(ref n) if n == "inline" => {
-                mark_used(attr);
-                InlineAttr::Hint
+        if attr.is_name() && attr.check_name("inline") {
+           mark_used(attr);
+           InlineAttr::Hint
+        } else if attr.is_list() && attr.check_name("inline") {
+          mark_used(attr);
+          if let Some(items) = attr.meta_item_list() {
+            if items.len() != 1 {
+              diagnostic.map(|d|{ d.span_err(attr.span, "expected one argument"); });
+              InlineAttr::None
+            } else if contains_name(&items[..], "always") {
+              InlineAttr::Always
+            } else if contains_name(&items[..], "never") {
+              InlineAttr::Never
+            } else {
+              diagnostic.map(|d|{ d.span_err((*items[0]).span, "invalid argument"); });
+              InlineAttr::None
             }
-            MetaItemKind::List(ref n, ref items) if n == "inline" => {
-                mark_used(attr);
-                if items.len() != 1 {
-                    diagnostic.map(|d|{ d.span_err(attr.span, "expected one argument"); });
-                    InlineAttr::None
-                } else if contains_name(&items[..], "always") {
-                    InlineAttr::Always
-                } else if contains_name(&items[..], "never") {
-                    InlineAttr::Never
-                } else {
-                    diagnostic.map(|d|{ d.span_err((*items[0]).span, "invalid argument"); });
-                    InlineAttr::None
-                }
-            }
-            _ => ia
-        }
+          } else {
+            diagnostic.map(|d|{ d.span_err(attr.span, "The compiler detected an attribute list but could not retrieve one"); });
+            InlineAttr::None
+          }
+        } else if attr.is_assign() && attr.check_name("inline") {
+            diagnostic.map(|d|{ d.span_err(attr.span, "illegal inline syntax (no assignments allowed)"); });
+            ia
+        } else {
+          ia
+        } 
     })
 }
 
@@ -364,6 +459,7 @@ pub fn requests_inline(attrs: &[Attribute]) -> bool {
     }
 }
 
+// TODO Sort what this thing is actually doing.
 /// Tests if a cfg-pattern matches the cfg set
 pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
                            cfg: &ast::MetaItem,
@@ -451,157 +547,95 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
         mark_used(attr);
 
         if let Some(metas) = attr.meta_item_list() {
-            let get = |meta: &MetaItem, item: &mut Option<InternedString>| {
-                if item.is_some() {
-                    diagnostic.span_err(meta.span, &format!("multiple '{}' items",
-                                                             meta.name()));
-                    return false
+          if let Some(mut map) = to_assign_map(diagnostic, metas) {
+            match tag
+              { "rustc_deprecated" => {
+                  if rustc_depr.is_some() {
+                    diagnostic.span_err(item_sp, "multiple rustc_deprecated attributes");
+                    break
+                  }
+                  let since  = map.remove("since");
+                  let reason = map.remove("reason");
+
+                  match (since, reason) {
+                    (Some(since), Some(reason)) => {
+                      rustc_depr = Some(RustcDeprecation { since  : since, reason : reason });
+                    }
+                    (None, _) => {
+                      diagnostic.span_err(attr.span(), "missing 'since'"); 
+                      continue 'outer
+                    }
+                    _ => {
+                      diagnostic.span_err(attr.span(), "missing 'reason'"); 
+                      continue 'outer
+                    }
+                  }
                 }
-                if let Some(v) = meta.value_str() {
-                    *item = Some(v);
-                    true
-                } else {
-                    diagnostic.span_err(meta.span, "incorrect meta item");
-                    false
+              , "unstable" => {
+                  if stab.is_some() {
+                    diagnostic.span_err(item_sp, "multiple stability levels");
+                    break
+                  }
+                  let feature = map.remove("feature");
+                  let reason  = map.remove("reason");
+                  let issue   = map.remove("issue");
+
+                  match (feature, reason, issue) {
+                    (Some(feature), reason, Some(issue)) => {
+                      if let Ok(issue) = issue.parse() {
+                        stab = Some(Stability { level      : Unstable { reason : reason
+                                                                      , issue  : issue }
+                                              , feature    : feature
+                                              , rustc_depr : None});
+                      } else {
+                        diagnostic.span_err(attr.span(), "incorrect 'issue'"); 
+                        continue 'outer
+                      }
+                    }
+                    (None, _, _) => {
+                      diagnostic.span_err(attr.span(), "missing 'feature'"); 
+                      continue 'outer
+                    }
+                    _ => {
+                      diagnostic.span_err(attr.span(), "missing 'issue'"); 
+                      continue 'outer
+                    }
+                  }
                 }
-            };
-
-            match tag {
-                "rustc_deprecated" => {
-                    if rustc_depr.is_some() {
-                        diagnostic.span_err(item_sp, "multiple rustc_deprecated attributes");
-                        break
+              , "stable" => {
+                  if stab.is_some() {
+                    diagnostic.span_err(item_sp, "multiple stability levels");
+                    break
+                  }
+                  let feature = map.remove("feature");
+                  let since   = map.remove("since");
+                  match (feature, since) {
+                    (Some(feature),Some(since)) => {
+                      stab = Some(Stability { level      : Stable { since : since }
+                                            , feature    : feature
+                                            , rustc_depr : None})
                     }
-
-                    let mut since = None;
-                    let mut reason = None;
-                    for meta in metas {
-                        match &*meta.name() {
-                            "since" => if !get(meta, &mut since) { continue 'outer },
-                            "reason" => if !get(meta, &mut reason) { continue 'outer },
-                            _ => {
-                                diagnostic.span_err(meta.span, &format!("unknown meta item '{}'",
-                                                                        meta.name()));
-                                continue 'outer
-                            }
-                        }
+                    (None, _) => {
+                      diagnostic.span_err(attr.span(), "missing 'feature'"); 
+                      continue 'outer
                     }
-
-                    match (since, reason) {
-                        (Some(since), Some(reason)) => {
-                            rustc_depr = Some(RustcDeprecation {
-                                since: since,
-                                reason: reason,
-                            })
-                        }
-                        (None, _) => {
-                            diagnostic.span_err(attr.span(), "missing 'since'");
-                            continue
-                        }
-                        _ => {
-                            diagnostic.span_err(attr.span(), "missing 'reason'");
-                            continue
-                        }
+                    _ => {
+                      diagnostic.span_err(attr.span(), "missing 'since'"); 
+                      continue 'outer
                     }
+                  }
                 }
-                "unstable" => {
-                    if stab.is_some() {
-                        diagnostic.span_err(item_sp, "multiple stability levels");
-                        break
-                    }
-
-                    let mut feature = None;
-                    let mut reason = None;
-                    let mut issue = None;
-                    for meta in metas {
-                        match &*meta.name() {
-                            "feature" => if !get(meta, &mut feature) { continue 'outer },
-                            "reason" => if !get(meta, &mut reason) { continue 'outer },
-                            "issue" => if !get(meta, &mut issue) { continue 'outer },
-                            _ => {
-                                diagnostic.span_err(meta.span, &format!("unknown meta item '{}'",
-                                                                        meta.name()));
-                                continue 'outer
-                            }
-                        }
-                    }
-
-                    match (feature, reason, issue) {
-                        (Some(feature), reason, Some(issue)) => {
-                            stab = Some(Stability {
-                                level: Unstable {
-                                    reason: reason,
-                                    issue: {
-                                        if let Ok(issue) = issue.parse() {
-                                            issue
-                                        } else {
-                                            diagnostic.span_err(attr.span(), "incorrect 'issue'");
-                                            continue
-                                        }
-                                    }
-                                },
-                                feature: feature,
-                                rustc_depr: None,
-                            })
-                        }
-                        (None, _, _) => {
-                            diagnostic.span_err(attr.span(), "missing 'feature'");
-                            continue
-                        }
-                        _ => {
-                            diagnostic.span_err(attr.span(), "missing 'issue'");
-                            continue
-                        }
-                    }
-                }
-                "stable" => {
-                    if stab.is_some() {
-                        diagnostic.span_err(item_sp, "multiple stability levels");
-                        break
-                    }
-
-                    let mut feature = None;
-                    let mut since = None;
-                    for meta in metas {
-                        match &*meta.name() {
-                            "feature" => if !get(meta, &mut feature) { continue 'outer },
-                            "since" => if !get(meta, &mut since) { continue 'outer },
-                            _ => {
-                                diagnostic.span_err(meta.span, &format!("unknown meta item '{}'",
-                                                                        meta.name()));
-                                continue 'outer
-                            }
-                        }
-                    }
-
-                    match (feature, since) {
-                        (Some(feature), Some(since)) => {
-                            stab = Some(Stability {
-                                level: Stable {
-                                    since: since,
-                                },
-                                feature: feature,
-                                rustc_depr: None,
-                            })
-                        }
-                        (None, _) => {
-                            diagnostic.span_err(attr.span(), "missing 'feature'");
-                            continue
-                        }
-                        _ => {
-                            diagnostic.span_err(attr.span(), "missing 'since'");
-                            continue
-                        }
-                    }
-                }
-                _ => unreachable!()
-            }
-        } else {
-            diagnostic.span_err(attr.span(), "incorrect stability attribute type");
+              , _ => unreachable!()
+              }
+          } else {
+            // to_assign_map has already produced the necessary diagnostic information
             continue
+          }
+        } else {
+          diagnostic.span_err(attr.span(), "incorrect stability attribute type");
+          continue
         }
     }
-
     // Merge the deprecation info into the stability info
     if let Some(rustc_depr) = rustc_depr {
         if let Some(ref mut stab) = stab {
@@ -709,58 +743,50 @@ pub fn require_unique_names(diagnostic: &Handler, metas: &[P<MetaItem>]) {
 /// the same discriminant size that the corresponding C enum would or C
 /// structure layout, and `packed` to remove padding.
 pub fn find_repr_attrs(diagnostic: &Handler, attr: &Attribute) -> Vec<ReprAttr> {
-    let mut acc = Vec::new();
-    match attr.node.value.node {
-        ast::MetaItemKind::List(ref s, ref items) if s == "repr" => {
-            mark_used(attr);
-            for item in items {
-                match item.node {
-                    ast::MetaItemKind::Word(ref word) => {
-                        let hint = match &word[..] {
-                            // Can't use "extern" because it's not a lexical identifier.
-                            "C" => Some(ReprExtern),
-                            "packed" => Some(ReprPacked),
-                            "simd" => Some(ReprSimd),
-                            _ => match int_type_of_word(&word) {
-                                Some(ity) => Some(ReprInt(item.span, ity)),
-                                None => {
-                                    // Not a word we recognize
-                                    diagnostic.span_err(item.span,
-                                                        "unrecognized representation hint");
-                                    None
-                                }
+  let mut acc = Vec::new();
+  if attr.is_list() && attr.check_name("repr") { 
+    let items = attr.meta_item_list().unwrap();
+    mark_used(attr);
+    for item in items {
+      if let Some(word) = item.maybe_word() {
+        let hint = match &word[..] // Can't use "extern" because it's not a lexical identifier.
+          { "C"      => Some(ReprExtern)
+          , "packed" => Some(ReprPacked)
+          , "simd"   => Some(ReprSimd)
+          , _        => match int_type_of_word(&word) 
+                          { Some(ity) => Some(ReprInt(item.span, ity))
+                          , None => { // Not a word we recognize
+                              diagnostic.span_err(item.span,
+                                                  "unrecognized representation hint");
+                              None
                             }
-                        };
-
-                        match hint {
-                            Some(h) => acc.push(h),
-                            None => { }
-                        }
-                    }
-                    // Not a word:
-                    _ => diagnostic.span_err(item.span, "unrecognized enum representation hint")
-                }
-            }
+                          }
+          };
+        match hint {
+          Some(h) => acc.push(h),
+          None    => { }
         }
-        // Not a "repr" hint: ignore.
-        _ => { }
+      } else { // Not a word:
+        diagnostic.span_err(item.span, "unrecognized enum representation hint")
+      }
     }
-    acc
+  }
+  acc
 }
 
 fn int_type_of_word(s: &str) -> Option<IntType> {
-    match s {
-        "i8" => Some(SignedInt(ast::IntTy::I8)),
-        "u8" => Some(UnsignedInt(ast::UintTy::U8)),
-        "i16" => Some(SignedInt(ast::IntTy::I16)),
-        "u16" => Some(UnsignedInt(ast::UintTy::U16)),
-        "i32" => Some(SignedInt(ast::IntTy::I32)),
-        "u32" => Some(UnsignedInt(ast::UintTy::U32)),
-        "i64" => Some(SignedInt(ast::IntTy::I64)),
-        "u64" => Some(UnsignedInt(ast::UintTy::U64)),
-        "isize" => Some(SignedInt(ast::IntTy::Is)),
-        "usize" => Some(UnsignedInt(ast::UintTy::Us)),
-        _ => None
+  match s 
+    { "i8"    => Some(SignedInt(ast::IntTy::I8))
+    , "u8"    => Some(UnsignedInt(ast::UintTy::U8))
+    , "i16"   => Some(SignedInt(ast::IntTy::I16))
+    , "u16"   => Some(UnsignedInt(ast::UintTy::U16))
+    , "i32"   => Some(SignedInt(ast::IntTy::I32))
+    , "u32"   => Some(UnsignedInt(ast::UintTy::U32))
+    , "i64"   => Some(SignedInt(ast::IntTy::I64))
+    , "u64"   => Some(UnsignedInt(ast::UintTy::U64))
+    , "isize" => Some(SignedInt(ast::IntTy::Is))
+    , "usize" => Some(UnsignedInt(ast::UintTy::Us))
+    , _       => None
     }
 }
 
@@ -801,11 +827,11 @@ impl IntType {
     }
     fn is_ffi_safe(self) -> bool {
         match self {
-            SignedInt(ast::IntTy::I8) | UnsignedInt(ast::UintTy::U8) |
+            SignedInt(ast::IntTy::I8)  | UnsignedInt(ast::UintTy::U8)  |
             SignedInt(ast::IntTy::I16) | UnsignedInt(ast::UintTy::U16) |
             SignedInt(ast::IntTy::I32) | UnsignedInt(ast::UintTy::U32) |
             SignedInt(ast::IntTy::I64) | UnsignedInt(ast::UintTy::U64) => true,
-            SignedInt(ast::IntTy::Is) | UnsignedInt(ast::UintTy::Us) => false
+            SignedInt(ast::IntTy::Is)  | UnsignedInt(ast::UintTy::Us)  => false
         }
     }
 }

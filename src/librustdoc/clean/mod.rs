@@ -533,6 +533,46 @@ impl attr::AttrMetaMethods for Attribute {
         }
     }
     fn meta_item_list<'a>(&'a self) -> Option<&'a [P<ast::MetaItem>]> { None }
+
+
+    fn is_name(&self) -> bool { 
+      match *self
+        { Word(_) => true
+        , _       => false
+        }
+    }
+
+    fn is_assign(&self) -> bool { 
+      match *self
+        { NameValue(_,_) => true
+        , _              => false
+        }
+    }
+
+    fn is_list(&self) -> bool { 
+      match *self
+        { List(_,_) => true
+        , _         => false
+        }
+    }
+   
+    fn maybe_word(&self) -> Option<InternedString> {
+      match *self 
+        { Word(ref n) => Some(token::intern_and_get_ident(n)) 
+        , _           => None
+        }
+    }
+
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
+      match *self
+        { NameValue(ref n, ref v) => {
+            Some((token::intern_and_get_ident(n)
+                 ,token::intern_and_get_ident(v)))
+          }
+        , _ => None
+        }
+    }
+
     fn span(&self) -> codemap::Span { unimplemented!() }
 }
 
