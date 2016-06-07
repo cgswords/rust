@@ -240,13 +240,13 @@ impl AttributeMethods for Attribute {
 pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
                               -> P<MetaItem> {
     let value_lit = dummy_spanned(ast::LitKind::Str(value, ast::StrStyle::Cooked));
-    mk_name_value_item(name, value_lit)
+    P(dummy_spanned(MetaItemKind::NameValue(name, value_lit)))
 }
 
-pub fn mk_name_value_item(name: InternedString, value: ast::Lit)
-                          -> P<MetaItem> {
-    P(dummy_spanned(MetaItemKind::NameValue(name, value)))
-}
+// pub fn mk_name_value_item(name: InternedString, value: ast::Lit)
+//                           -> P<MetaItem> {
+//     P(dummy_spanned(MetaItemKind::NameValue(name, value)))
+// }
 
 pub fn mk_list_item(name: InternedString, items: Vec<P<MetaItem>>) -> P<MetaItem> {
     P(dummy_spanned(MetaItemKind::List(name, items)))
@@ -351,13 +351,14 @@ pub fn first_attr_value_str_by_name(attrs: &[Attribute], name: &str)
         .and_then(|at| at.value_str())
 }
 
-pub fn last_meta_item_value_str_by_name(items: &[P<MetaItem>], name: &str)
-                                     -> Option<InternedString> {
-    items.iter()
-         .rev()
-         .find(|mi| mi.check_name(name))
-         .and_then(|i| i.value_str())
-}
+// This never gets called
+// pub fn last_meta_item_value_str_by_name(items: &[P<MetaItem>], name: &str)
+//                                      -> Option<InternedString> {
+//     items.iter()
+//          .rev()
+//          .find(|mi| mi.check_name(name))
+//          .and_then(|i| i.value_str())
+// }
 
 /* Higher-level applications */
 
@@ -459,40 +460,54 @@ pub fn requests_inline(attrs: &[Attribute]) -> bool {
     }
 }
 
+
 // TODO Sort what this thing is actually doing.
 /// Tests if a cfg-pattern matches the cfg set
 pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
                            cfg: &ast::MetaItem,
                            diag: &mut T) -> bool {
-    match cfg.node {
-        ast::MetaItemKind::List(ref pred, ref mis) if &pred[..] == "any" =>
-            mis.iter().any(|mi| cfg_matches(cfgs, &mi, diag)),
-        ast::MetaItemKind::List(ref pred, ref mis) if &pred[..] == "all" =>
-            mis.iter().all(|mi| cfg_matches(cfgs, &mi, diag)),
-        ast::MetaItemKind::List(ref pred, ref mis) if &pred[..] == "not" => {
-            if mis.len() != 1 {
+  if cfg.is_list() {
+    let name = cfg.name();
+      if let Some(items) = cfg.meta_item_list() {
+        match &name[..] 
+          { "any" => items.iter().any(|mi| cfg_matches(cfgs, &mi, diag))
+          , "all" => items.iter().all(|mi| cfg_matches(cfgs, &mi, diag))
+          , "not" => { 
+             if items.len() != 1 {
                 diag.emit_error(|diagnostic| {
                     diagnostic.span_err(cfg.span, "expected 1 cfg-pattern");
                 });
                 return false;
+              } 
+              !cfg_matches(cfgs, &items[0], diag)
             }
-            !cfg_matches(cfgs, &mis[0], diag)
-        }
-        ast::MetaItemKind::List(ref pred, _) => {
-            diag.emit_error(|diagnostic| {
+          ,_ => {
+              diag.emit_error(|diagnostic| {
                 diagnostic.span_err(cfg.span,
-                    &format!("invalid predicate `{}`", pred));
-            });
-            false
-        },
-        ast::MetaItemKind::Word(_) | ast::MetaItemKind::NameValue(..) => {
-            diag.flag_gated(|feature_gated_cfgs| {
-                feature_gated_cfgs.extend(
-                    GatedCfg::gate(cfg).map(GatedCfgAttr::GatedCfg));
-            });
-            contains(cfgs, cfg)
-        }
-    }
+                  &format!("invalid predicate `{}`", name));
+               });
+              false
+            }
+          }
+      } else {
+        diag.emit_error(|diagnostic| {
+          diagnostic.span_err(cfg.span,
+            &format!("invalid attribute form `{:?}`", cfg));
+         });
+       false
+     }
+  } else if cfg.is_name() || cfg.is_assign() {
+    diag.flag_gated(|feature_gated_cfgs| {
+      feature_gated_cfgs.extend(
+        GatedCfg::gate(cfg).map(GatedCfgAttr::GatedCfg));
+    });
+    contains(cfgs, cfg)
+  } else {
+    diag.emit_error(|diagnostic| {
+      diagnostic.span_err(cfg.span, &format!("Invalid metaitem `{:?}`", cfg));
+    });
+    false
+  }
 }
 
 /// Represents the #[stable], #[unstable] and #[rustc_deprecated] attributes.
@@ -609,6 +624,9 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
                   }
                   let feature = map.remove("feature");
                   let since   = map.remove("since");
+                  if !map.is_empty() {
+                    
+                  }
                   match (feature, since) {
                     (Some(feature),Some(since)) => {
                       stab = Some(Stability { level      : Stable { since : since }
