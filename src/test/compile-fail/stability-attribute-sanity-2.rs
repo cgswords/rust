@@ -17,7 +17,7 @@
 #[stable(feature = "a", feature = "b", since = "1.0.0")] //~ ERROR multiple 'feature' items
 fn f1() { }
 
-#[stable(feature = "a", sinse = "1.0.0")] //~ ERROR missing 'since'
+#[stable(feature = "a", sinse = "1.0.0")] //~ ERROR incorrect attribute item 'sinse', expected items 'feature', 'since'
 fn f2() { }
 
 #[unstable(feature = "a", issue = "no")] //~ ERROR incorrect 'issue'

@@ -256,11 +256,34 @@ pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
     P(dummy_spanned(MetaItemKind::Word(name)))
 }
 
-//-------------------------------------------------------------------------------------------------------
-fn to_assign_map(diagnostic: &Handler, metas : &[P<MetaItem>]) -> Option<HashMap<String, InternedString>> {
+fn pretty_print_args(args: &[&str]) -> String {
+  let mut comma_sep = String::new();
+	
+  comma_sep.push_str("'");
+  comma_sep.push_str(args[0]);
+  comma_sep.push_str("'");
+
+	for arg in args.into_iter().skip(1) {
+    comma_sep.push_str(", '");
+    comma_sep.push_str(arg);
+  comma_sep.push_str("'");
+  }
+	
+	comma_sep
+}
+
+fn to_assign_map(diagnostic: &Handler, expected_names : &[&str], metas : &[P<MetaItem>]) 
+                 -> Option<HashMap<String, InternedString>> {
   let mut metamap : HashMap<String, InternedString> = HashMap::new();
 
   for meta in metas {
+    if !expected_names.contains(&(&meta.name()[..])) {
+      diagnostic.span_err(meta.span, 
+                          &format!("incorrect attribute item '{}', expected items {}", 
+																	 meta.name(), 
+																	 pretty_print_args(expected_names)));
+      return None;
+    }
     if let Some((name, lit)) = meta.maybe_assign() {
       let name = (&*name).to_string();
       if metamap.contains_key(&name) {
@@ -270,7 +293,9 @@ fn to_assign_map(diagnostic: &Handler, metas : &[P<MetaItem>]) -> Option<HashMap
       metamap.insert(name, lit);
     } else {
       diagnostic.span_err(meta.span, 
-                          &format!("Incorrect meta item format '{}'", meta.name()));
+                          &format!("incorrect attribute format for '{}', \
+                                    expected '{} = \"value\"'", 
+                                   meta.name(), meta.name()));
       return None;
     }
   }
@@ -278,7 +303,7 @@ fn to_assign_map(diagnostic: &Handler, metas : &[P<MetaItem>]) -> Option<HashMap
   Some(metamap)
 }
 
-//-------------------------------------------------------------------------------------------------------
+// Setting up structures for attribute IDs to track their usages.
 thread_local! { static NEXT_ATTR_ID: Cell<usize> = Cell::new(0) }
 
 pub fn mk_attr_id() -> AttrId {
@@ -562,92 +587,96 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
         mark_used(attr);
 
         if let Some(metas) = attr.meta_item_list() {
-          if let Some(mut map) = to_assign_map(diagnostic, metas) {
-            match tag
-              { "rustc_deprecated" => {
-                  if rustc_depr.is_some() {
-                    diagnostic.span_err(item_sp, "multiple rustc_deprecated attributes");
-                    break
-                  }
-                  let since  = map.remove("since");
-                  let reason = map.remove("reason");
-
-                  match (since, reason) {
-                    (Some(since), Some(reason)) => {
-                      rustc_depr = Some(RustcDeprecation { since  : since, reason : reason });
-                    }
-                    (None, _) => {
-                      diagnostic.span_err(attr.span(), "missing 'since'"); 
-                      continue 'outer
-                    }
-                    _ => {
-                      diagnostic.span_err(attr.span(), "missing 'reason'"); 
-                      continue 'outer
-                    }
-                  }
-                }
-              , "unstable" => {
-                  if stab.is_some() {
-                    diagnostic.span_err(item_sp, "multiple stability levels");
-                    break
-                  }
-                  let feature = map.remove("feature");
-                  let reason  = map.remove("reason");
-                  let issue   = map.remove("issue");
-
-                  match (feature, reason, issue) {
-                    (Some(feature), reason, Some(issue)) => {
-                      if let Ok(issue) = issue.parse() {
-                        stab = Some(Stability { level      : Unstable { reason : reason
-                                                                      , issue  : issue }
-                                              , feature    : feature
-                                              , rustc_depr : None});
-                      } else {
-                        diagnostic.span_err(attr.span(), "incorrect 'issue'"); 
-                        continue 'outer
-                      }
-                    }
-                    (None, _, _) => {
-                      diagnostic.span_err(attr.span(), "missing 'feature'"); 
-                      continue 'outer
-                    }
-                    _ => {
-                      diagnostic.span_err(attr.span(), "missing 'issue'"); 
-                      continue 'outer
-                    }
-                  }
-                }
-              , "stable" => {
-                  if stab.is_some() {
-                    diagnostic.span_err(item_sp, "multiple stability levels");
-                    break
-                  }
-                  let feature = map.remove("feature");
-                  let since   = map.remove("since");
-                  if !map.is_empty() {
-                    
-                  }
-                  match (feature, since) {
-                    (Some(feature),Some(since)) => {
-                      stab = Some(Stability { level      : Stable { since : since }
-                                            , feature    : feature
-                                            , rustc_depr : None})
-                    }
-                    (None, _) => {
-                      diagnostic.span_err(attr.span(), "missing 'feature'"); 
-                      continue 'outer
-                    }
-                    _ => {
-                      diagnostic.span_err(attr.span(), "missing 'since'"); 
-                      continue 'outer
-                    }
-                  }
-                }
-              , _ => unreachable!()
+          match tag {
+            "rustc_deprecated" => {
+              if rustc_depr.is_some() {
+                diagnostic.span_err(item_sp, "multiple rustc_deprecated attributes");
+                break
               }
-          } else {
-            // to_assign_map has already produced the necessary diagnostic information
-            continue
+              if let Some(mut map) = to_assign_map(diagnostic, &["since", "reason"], metas) {
+                let since  = map.remove("since");
+                let reason = map.remove("reason");
+                match (since, reason) {
+                  (Some(since), Some(reason)) => {
+                    rustc_depr = Some(RustcDeprecation { since  : since, reason : reason });
+                  }
+                  (None, _) => {
+                    diagnostic.span_err(attr.span(), "missing 'since'"); 
+                    continue 'outer
+                  }
+                  _ => {
+                    diagnostic.span_err(attr.span(), "missing 'reason'"); 
+                    continue 'outer
+                  }
+                }
+              } else { // to_assign_map has already produced the necessary diagnostic information
+                continue 'outer
+              }
+            }
+            "unstable" => {
+              if stab.is_some() {
+                diagnostic.span_err(item_sp, "multiple stability levels");
+                break
+              }
+              if let Some(mut map) = to_assign_map(diagnostic, 
+                                                   &["feature", "reason", "issue"], metas) {
+                let feature = map.remove("feature");
+                let reason  = map.remove("reason");
+                let issue   = map.remove("issue");
+                match (feature, reason, issue) {
+                  (Some(feature), reason, Some(issue)) => {
+                    if let Ok(issue) = issue.parse() {
+                      stab = Some(Stability { level      : Unstable { reason : reason
+                                                                    , issue  : issue }
+                                            , feature    : feature
+                                            , rustc_depr : None});
+                    } else {
+                      diagnostic.span_err(attr.span(), "incorrect 'issue'"); 
+                      continue 'outer
+                    }
+                  }
+                  (None, _, _) => {
+                    diagnostic.span_err(attr.span(), "missing 'feature'"); 
+                    continue 'outer
+                  }
+                  _ => {
+                    diagnostic.span_err(attr.span(), "missing 'issue'"); 
+                    continue 'outer
+                  }
+                }
+              } else { // to_assign_map has already produced the necessary diagnostic information
+                continue 'outer
+              }
+            }
+            "stable" => {
+              if stab.is_some() {
+                diagnostic.span_err(item_sp, "multiple stability levels");
+                break
+              }
+              if let Some(mut map) = to_assign_map(diagnostic, &["feature", "since"], metas) {
+                let feature = map.remove("feature");
+                let since   = map.remove("since");
+                match (feature, since) {
+                  (Some(feature),Some(since)) => {
+                    stab = Some(Stability { level      : Stable { since : since }
+                                          , feature    : feature
+                                          , rustc_depr : None})
+                  }
+                  (None, _) => {
+                    diagnostic.span_err(attr.span(), "missing 'feature'"); 
+                    continue 'outer
+                  }
+                  _ => {
+                    diagnostic.span_err(attr.span(), "missing 'since'"); 
+                    continue 'outer
+                  }
+                }
+              } else { // to_assign_map has already produced the necessary diagnostic information
+                continue 'outer
+              }
+
+            }
+            _ => unreachable!()
           }
         } else {
           diagnostic.span_err(attr.span(), "incorrect stability attribute type");

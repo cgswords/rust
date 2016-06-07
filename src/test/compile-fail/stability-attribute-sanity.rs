@@ -15,19 +15,19 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 mod bogus_attribute_types_1 {
-    #[stable(feature = "a", since = "a", reason)] //~ ERROR unknown meta item 'reason'
+    #[stable(feature = "a", since = "a", reason)] //~ ERROR incorrect attribute item 'reason', expected items 'feature', 'since'
     fn f1() { }
 
-    #[stable(feature = "a", since)] //~ ERROR incorrect meta item
+    #[stable(feature = "a", since)] //~ ERROR incorrect attribute format for 'since', expected 'since = "value"'
     fn f2() { }
 
-    #[stable(feature, since = "a")] //~ ERROR incorrect meta item
+    #[stable(feature, since = "a")] //~ ERROR incorrect attribute format for 'feature', expected 'feature = "value"'
     fn f3() { }
 
-    #[stable(feature = "a", since(b))] //~ ERROR incorrect meta item
+    #[stable(feature = "a", since(b))] //~ ERROR incorrect attribute format for 'since', expected 'since = "value"'
     fn f5() { }
 
-    #[stable(feature(b), since = "a")] //~ ERROR incorrect meta item
+    #[stable(feature(b), since = "a")] //~ ERROR incorrect attribute format for 'feature', expected 'feature = "value"'
     fn f6() { }
 }
 
@@ -92,6 +92,6 @@ fn multiple4() { } //~ ERROR multiple rustc_deprecated attributes
 //~^ ERROR Invalid stability or deprecation version found
 
 #[rustc_deprecated(since = "a", reason = "text")]
-fn deprecated_without_unstable_or_stable() { } //~ ERROR rustc_deprecated attribute must be paired
+fn deprecated_without_unstable_or_stable() { } //~ ERROR rustc_deprecated attribute must be paired with either stable or unstable attribute
 
 fn main() { }
