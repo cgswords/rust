@@ -690,18 +690,20 @@ impl ReifiedMetaItem {
     match self.node {
       ReifiedMetaItem_::Word(_) => tts_to_ts(vec![]),
       ReifiedMetaItem_::Assign(_, l) => TokenStream::from_ast_lit_str(l),
-      ReifiedMetaItem_::List(_, ls) => {
-        if ls.len() == 0 { return tts_to_ts(vec![]) }
-
-        let mut tts = Vec::new();
-        tts.append(&mut ls[0].to_tts());
-        for l in ls.iter().skip(1) {
-          tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
-          tts.append(&mut l.to_tts());
-        }
-        tts_to_ts(tts)
-      }
+      ReifiedMetaItem_::List(_, ls) => ReifiedMetaItem::recover_vec_tokenstream(ls)
     }
+  }
+
+  pub fn recover_vec_tokenstream(ls : Vec<MetaItem>) -> TokenStream {
+    if ls.len() == 0 { return tts_to_ts(vec![]) }
+
+    let mut tts = Vec::new();
+    tts.append(&mut ls[0].to_tts());
+    for l in ls.iter().skip(1) {
+      tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+      tts.append(&mut l.to_tts());
+    }
+    tts_to_ts(tts)
   }
 }
 

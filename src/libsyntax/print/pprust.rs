@@ -17,7 +17,7 @@ use ast::Attribute;
 use attr::ThinAttributesExt;
 use util::parser::AssocOp;
 use attr;
-use attr::{AttrMetaMethods, AttributeMethods};
+use attr::{AttrMetaMethods};
 use codemap::{self, CodeMap, BytePos};
 use errors;
 use parse::token::{self, keywords, BinOpToken, Token, InternedString};

@@ -464,13 +464,15 @@ impl AttributeMethods for Attribute {
         }
     }
 }
-
+*/
 /* Constructors */
 
 pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
                               -> P<MetaItem> {
-    let value_lit = dummy_spanned(ast::LitKind::Str(value, ast::StrStyle::Cooked));
-    P(dummy_spanned(MetaItemKind::NameValue(name, value_lit)))
+  let value_lit = dummy_spanned(ast::LitKind::Str(value, ast::StrStyle::Cooked));
+  P(dummy_spanned(MetaItemKind { name   : name
+                               , stream : tokenstream::TokenStream::from_ast_lit_str(value_lit)
+                               }))
 }
 
 // pub fn mk_name_value_item(name: InternedString, value: ast::Lit)
@@ -478,14 +480,17 @@ pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
 //     P(dummy_spanned(MetaItemKind::NameValue(name, value)))
 // }
 
-pub fn mk_list_item(name: InternedString, items: Vec<P<MetaItem>>) -> P<MetaItem> {
-    P(dummy_spanned(MetaItemKind::List(name, items)))
+pub fn mk_list_item(name: InternedString, items: Vec<MetaItem>) -> P<MetaItem> {
+  P(dummy_spanned(MetaItemKind { name : name
+                               , stream : ReifiedMetaItem::recover_vec_tokenstream(items) }))
 }
 
 pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
-    P(dummy_spanned(MetaItemKind::Word(name)))
+  P(dummy_spanned(MetaItemKind { name : name
+                               , stream : tokenstream::tts_to_ts(vec![])
+                               }))
 }
-*/
+
 
 //-----------------------------------------------------------------------------------
 //-----------------------------------------------------------------------------------
