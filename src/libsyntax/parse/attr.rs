@@ -9,13 +9,14 @@
 // except according to those terms.
 
 use attr;
-use ast;
+use ast::{self, MetaItemKind};
 use codemap::{spanned, Spanned, mk_sp, Span};
 use parse::common::SeqSep;
 use parse::PResult;
 use parse::token;
-use parse::parser::{Parser, TokenType};
+use parse::parser::{Parser, TokenType, PathStyle};
 use ptr::P;
+use tokenstream::{self, TokenTree, TokenStream};
 
 impl<'a> Parser<'a> {
     /// Parse attributes that appear before an item
@@ -57,7 +58,7 @@ impl<'a> Parser<'a> {
         debug!("parse_attributes: permit_inner={:?} self.token={:?}",
                permit_inner,
                self.token);
-        let (span, value, mut style) = match self.token {
+        let (span, path, stream, mut style) = match self.token {
             token::Pound => {
                 let lo = self.span.lo;
                 self.bump();
@@ -82,11 +83,25 @@ impl<'a> Parser<'a> {
                 };
 
                 self.expect(&token::OpenDelim(token::Bracket))?;
-                let meta_item = self.parse_meta_item()?;
-                let hi = self.span.hi;
+                let meta_lo = self.span.lo;
+                let path = self.parse_path(PathStyle::Mod)?;
+                let mut tts : Vec<TokenTree> = Vec::new();
+                loop {
+                  match self.token {
+                    token::CloseDelim(token::Bracket) => { 
+                      self.bump();
+                      break }
+                    _ => {
+                      let tt = self.parse_token_tree()?;
+                      tts.push(tt);
+                    }
+                  }
+                }
+                let meta_hi = self.span.hi;
                 self.expect(&token::CloseDelim(token::Bracket))?;
+                let hi = self.span.hi;
 
-                (mk_sp(lo, hi), meta_item, style)
+                (mk_sp(lo, hi), path, tokenstream::tts_to_ts(tts), style)
             }
             _ => {
                 let token_str = self.this_token_to_string();
@@ -107,7 +122,8 @@ impl<'a> Parser<'a> {
             node: ast::Attribute_ {
                 id: attr::mk_attr_id(),
                 style: style,
-                value: value,
+                path: path,
+                stream: stream,
                 is_sugared_doc: false,
             },
         })
@@ -135,8 +151,8 @@ impl<'a> Parser<'a> {
                 token::DocComment(s) => {
                     // we need to get the position of this token before we bump.
                     let Span { lo, hi, .. } = self.span;
-                    let str = self.id_to_interned_str(ast::Ident::with_empty_ctxt(s));
-                    let attr = attr::mk_sugared_doc_attr(attr::mk_attr_id(), str, lo, hi);
+                    let name = self.id_to_interned_str(ast::Ident::with_empty_ctxt(s));
+                    let attr = attr::mk_sugared_doc_attr(attr::mk_attr_id(), name, lo, hi);
                     if attr.node.style == ast::AttrStyle::Inner {
                         attrs.push(attr);
                         self.bump();
@@ -150,52 +166,54 @@ impl<'a> Parser<'a> {
         Ok(attrs)
     }
 
-    /// matches meta_item = IDENT
-    /// | IDENT = lit
-    /// | IDENT meta_seq
+    /// matches 
+    /// meta_item = IDENT
+    ///           | IDENT = <tt>
+    ///           | IDENT <tt> (where <tt> is `(...)`)
+
+    // TODO What to do here? I think the right thing is to just parse it like it's an
+    // old-style meta_item and then induce the tokenstream structure at the end.
     pub fn parse_meta_item(&mut self) -> PResult<'a, P<ast::MetaItem>> {
-        let nt_meta = match self.token {
-            token::Interpolated(token::NtMeta(ref e)) => Some(e.clone()),
-            _ => None,
-        };
+      let nt_meta = match self.token {
+          token::Interpolated(token::NtMeta(ref e)) => Some(e.clone()),
+          _ => None,
+      };
 
-        match nt_meta {
-            Some(meta) => {
-                self.bump();
-                return Ok(meta);
-            }
-            None => {}
-        }
+      match nt_meta {
+          Some(meta) => {
+              self.bump();
+              return Ok(meta);
+          }
+          None => {}
+      }
 
-        let lo = self.span.lo;
-        let ident = self.parse_ident()?;
-        let name = self.id_to_interned_str(ident);
-        match self.token {
-            token::Eq => {
-                self.bump();
-                let lit = self.parse_lit()?;
-                // FIXME #623 Non-string meta items are not serialized correctly;
-                // just forbid them for now
-                match lit.node {
-                    ast::LitKind::Str(..) => {}
-                    _ => {
-                        self.span_err(lit.span,
-                                      "non-string literals are not allowed in meta-items");
-                    }
-                }
-                let hi = self.span.hi;
-                Ok(P(spanned(lo, hi, ast::MetaItemKind::NameValue(name, lit))))
-            }
-            token::OpenDelim(token::Paren) => {
-                let inner_items = self.parse_meta_seq()?;
-                let hi = self.span.hi;
-                Ok(P(spanned(lo, hi, ast::MetaItemKind::List(name, inner_items))))
-            }
-            _ => {
-                let hi = self.last_span.hi;
-                Ok(P(spanned(lo, hi, ast::MetaItemKind::Word(name))))
-            }
-        }
+      let lo = self.span.lo;
+      let ident = self.parse_ident()?;
+      let name = self.id_to_interned_str(ident);
+
+      let mut tts : Vec<TokenTree> = Vec::new();
+      match self.token {
+          token::Eq => {
+            // grab up that equal sign
+            let tt = self.parse_token_tree()?; 
+            tts.push(tt);
+
+            // and whatever is next (and let's hope there's only one thing)
+            let tt = self.parse_token_tree()?;
+            tts.push(tt);
+          }
+          token::OpenDelim(token::Paren) => {
+            let tt = self.parse_token_tree()?; 
+            tts.push(tt);
+          }
+          _ => { }
+      }
+
+      let hi = self.span.hi;
+      Ok(P(spanned(lo, hi, ast::MetaItemKind
+                             { name   : name
+                             , stream : tokenstream::tts_to_ts(tts)
+                             })));
     }
 
     /// matches meta_seq = ( COMMASEP(meta_item) )

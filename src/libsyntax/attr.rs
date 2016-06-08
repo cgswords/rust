@@ -15,29 +15,49 @@ pub use self::ReprAttr::*;
 pub use self::IntType::*;
 
 use ast;
-use ast::{AttrId, Attribute, Attribute_, MetaItem, MetaItemKind};
+use ast::{AttrId, Attribute, Attribute_, ReifiedAttr, ReifiedAttr_};
+use ast::{MetaItem, MetaItemKind, ReifiedMetaItem, ReifiedMetaItem_, reify_metaitem_list};
 use ast::{Stmt, StmtKind, DeclKind};
 use ast::{Expr, Item, Local, Decl};
-use codemap::{Span, Spanned, spanned, dummy_spanned};
+use codemap::{Span, Spanned, spanned, dummy_spanned, mk_sp};
 use codemap::BytePos;
 use config::CfgDiag;
 use errors::Handler;
 use feature_gate::{GatedCfg, GatedCfgAttr};
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
 use parse::token::InternedString;
+use parse::token::{str_to_ident};
 use parse::token;
 use ptr::P;
+use tokenstream;
 
 use std::cell::{RefCell, Cell};
 use std::collections::HashSet;
 use std::collections::HashMap;
 
+
+// For marking attributes as used by their IDs
 thread_local! {
     static USED_ATTRS: RefCell<Vec<u64>> = RefCell::new(Vec::new())
 }
 
 pub fn mark_used(attr: &Attribute) {
     let AttrId(id) = attr.node.id;
+    USED_ATTRS.with(|slot| {
+        let idx = (id / 64) as usize;
+        let shift = id % 64;
+        if slot.borrow().len() <= idx {
+            slot.borrow_mut().resize(idx + 1, 0);
+        }
+        slot.borrow_mut()[idx] |= 1 << shift;
+    });
+}
+
+pub fn mark_reified_used(attr: &ReifiedAttr) {
+    let AttrId(id) = 
+      match (*attr).node {
+        ReifiedAttr_::Word(id,_) | ReifiedAttr_::Assign(id,_,_) | ReifiedAttr_::List(id,_,_) => id
+      };
     USED_ATTRS.with(|slot| {
         let idx = (id / 64) as usize;
         let shift = id % 64;
@@ -58,6 +78,20 @@ pub fn is_used(attr: &Attribute) -> bool {
     })
 }
 
+pub fn is_reified_used(attr: &ReifiedAttr) -> bool {
+    let AttrId(id) = 
+      match (*attr).node {
+        ReifiedAttr_::Word(id,_) | ReifiedAttr_::Assign(id,_,_) | ReifiedAttr_::List(id,_,_) => id
+      };
+    USED_ATTRS.with(|slot| {
+        let idx = (id / 64) as usize;
+        let shift = id % 64;
+        slot.borrow().get(idx).map(|bits| bits & (1 << shift) != 0)
+            .unwrap_or(false)
+    })
+}
+
+// MetaMethods for inspecting reified attributes and reified metaitems.
 pub trait AttrMetaMethods {
     fn check_name(&self, name: &str) -> bool {
         name == &self.name()[..]
@@ -91,80 +125,126 @@ impl AttrMetaMethods for Attribute {
         }
         matches
     }
-    fn name(&self) -> InternedString { self.meta().name() }
-    fn value_str(&self) -> Option<InternedString> {
-        self.meta().value_str()
-    }
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
-        self.node.value.meta_item_list()
+
+    fn name(&self) -> InternedString {
+      self.node.path.get_last_ident().name.as_str() 
     }
 
-    fn is_name(&self)   -> bool { self.meta().is_name() }
-    fn is_assign(&self) -> bool { self.meta().is_assign() }
-    fn is_list(&self)   -> bool { self.meta().is_list() }
+    fn value_str(&self) -> Option<InternedString> {
+      if let Some(ra) = self.to_reified_attr() {
+        ra.value_str()
+      } else {
+        None 
+      }
+    }
+
+    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+      if let Some(ra) = self.to_reified_attr() {
+        ra.meta_item_list()
+      } else {
+        None
+      }
+    }
+
+    fn is_name(&self) -> bool {
+      if self.node.stream.is_empty() {
+        true
+      } else { false }
+    }
     
-    fn maybe_word(&self)   -> Option<InternedString> { self.meta().maybe_word() }
+    fn is_assign(&self) -> bool { 
+      if self.node.stream.is_assignment() {
+        true
+      } else { false }
+    }
+    
+    fn is_list(&self) -> bool { 
+      if self.node.stream.is_delimited() {
+        true
+      } else { false }
+    }
+ 
+    fn maybe_word(&self) -> Option<InternedString> {
+      if let Some(ra) = self.to_reified_attr() {
+        ra.maybe_word()
+      } else {
+        None
+      }
+    }
 
     fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
-      self.meta().maybe_assign() 
+      if let Some(ra) = self.to_reified_attr() {
+        ra.maybe_assign()
+      } else {
+        None
+      }
     }
 
-    fn span(&self) -> Span { self.meta().span }
-    
+    fn span(&self) -> Span { self.span }
 }
 
-impl AttrMetaMethods for MetaItem {
-    fn name(&self) -> InternedString {
-        match self.node {
-            MetaItemKind::Word(ref n) => (*n).clone(),
-            MetaItemKind::NameValue(ref n, _) => (*n).clone(),
-            MetaItemKind::List(ref n, _) => (*n).clone(),
+impl AttrMetaMethods for ReifiedAttr {
+    fn check_name(&self, name: &str) -> bool {
+        let matches = name == &self.name()[..];
+        if matches {
+            mark_reified_used(self);
         }
+        matches
+    }
+
+    fn name(&self) -> InternedString { 
+      match self.node {
+        ReifiedAttr_::Word(_,p) | ReifiedAttr_::Assign(_,p,_) | ReifiedAttr_::List(_,p,_) 
+          => p.get_last_ident().name.as_str()
+      }
     }
 
     fn value_str(&self) -> Option<InternedString> {
-        match self.node {
-            MetaItemKind::NameValue(_, ref v) => {
-                match v.node {
-                    ast::LitKind::Str(ref s, _) => Some((*s).clone()),
-                    _ => None,
-                }
-            },
-            _ => None
+      match self.node {
+        ReifiedAttr_::Assign(_,_,ref  v) => {
+          match v.node {
+            ast::LitKind::Str(ref s, _) => Some((*s).clone()),
+            _ => None,
+          }
         }
+        _ => None
+      }
     }
 
     fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
-        match self.node {
-            MetaItemKind::List(_, ref l) => Some(&l[..]),
-            _ => None
-        }
+      match self.node {
+      ReifiedAttr_::List(_,_, mi) => {
+        let mis = mi.iter().map(|&x| P(x)).collect::<Vec<P<MetaItem>>>();
+        Some(&mis[..])
+      }
+      _ => None 
+      }
     }
 
     fn is_name(&self) -> bool { 
       match self.node
-        { MetaItemKind::Word(_) => true
-        , _                     => false
+        { ReifiedAttr_::Word(_,_) => true
+        , _ => false
         }
     }
     
     fn is_assign(&self) -> bool { 
       match self.node
-        { MetaItemKind::NameValue(_,_) => true
-        , _                            => false
+        { ReifiedAttr_::Assign(_,_,_) => true
+        , _ => false
         }
     }
     
     fn is_list(&self) -> bool { 
       match self.node
-        { MetaItemKind::List(_,_) => true
-        , _                       => false
+        { ReifiedAttr_::List(_,_,_) => true
+        , _ => false
         }
     }
-
+ 
     fn maybe_word(&self) -> Option<InternedString> {
       match self.node {
-        MetaItemKind::Word(ref n) => Some((*n).clone()),
+        ReifiedAttr_::Word(_,ref n) => Some(self.name()),
         _ => None
       }
     }
@@ -174,14 +254,165 @@ impl AttrMetaMethods for MetaItem {
       let val = self.value_str();
       match val
         { Some(v) => Some((name, v)) 
-        , _       => None 
+        , _ => None 
         }
     }
 
     fn span(&self) -> Span { self.span }
 }
 
-// Annoying, but required to get test_cfg to work
+impl AttrMetaMethods for MetaItem {
+    fn check_name(&self, name: &str) -> bool {
+      let matches = name == &self.name()[..];
+      matches
+    }
+
+    fn name(&self) -> InternedString {
+      self.node.name
+    }
+
+    fn value_str(&self) -> Option<InternedString> {
+      if let Some(ra) = self.to_reified_metaitem() {
+        ra.value_str()
+      } else {
+        None
+      }
+    }
+
+    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+      if let Some(ra) = self.to_reified_metaitem() {
+        ra.meta_item_list()
+      } else {
+        None
+      }
+    }
+
+    fn is_name(&self) -> bool {
+      if self.node.stream.is_empty() {
+        true
+      } else { false }
+    }
+    
+    fn is_assign(&self) -> bool { 
+      if self.node.stream.is_assignment() {
+        true
+      } else { false }
+    }
+    
+    fn is_list(&self) -> bool { 
+      if self.node.stream.is_delimited() {
+        true
+      } else { false }
+    }
+ 
+    fn maybe_word(&self) -> Option<InternedString> {
+      if let Some(ra) = self.to_reified_metaitem() {
+        ra.maybe_word()
+      } else {
+        None
+      }
+    }
+
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
+      if let Some(ra) = self.to_reified_metaitem() {
+        ra.maybe_assign()
+      } else {
+        None
+      }
+    }
+
+    fn span(&self) -> Span { self.span }
+}
+
+impl AttrMetaMethods for ReifiedMetaItem {
+    fn name(&self) -> InternedString {
+      match self.node {
+        ReifiedMetaItem_::Word(ref n) => (*n).clone(),
+        ReifiedMetaItem_::Assign(ref n, _) => (*n).clone(),
+        ReifiedMetaItem_::List(ref n, _) => (*n).clone(),
+      }
+    }
+
+    fn value_str(&self) -> Option<InternedString> {
+      match self.node {
+        ReifiedMetaItem_::Assign(_, ref v) => {
+          match v.node {
+            ast::LitKind::Str(ref s, _) => Some((*s).clone()),
+            _ => None,
+          }
+        },
+        _ => None
+      }
+    }
+
+    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+      match self.node {
+        ReifiedMetaItem_::List(_, mi) => {
+          let mis = mi.iter().map(|&x| P(x)).collect::<Vec<P<MetaItem>>>();
+          Some(&mis[..])
+        }
+        _ => None
+      }
+    }
+
+    fn is_name(&self) -> bool { 
+      match self.node
+        { ReifiedMetaItem_::Word(_) => true
+        , _ => false
+        }
+    }
+    
+    fn is_assign(&self) -> bool { 
+      match self.node
+        { ReifiedMetaItem_::Assign(_,_) => true
+        , _ => false
+        }
+    }
+    
+    fn is_list(&self) -> bool { 
+      match self.node
+        { ReifiedMetaItem_::List(_,_) => true
+        , _ => false
+        }
+    }
+
+    fn maybe_word(&self) -> Option<InternedString> {
+      match self.node {
+        ReifiedMetaItem_::Word(ref n) => Some((*n).clone()),
+        _ => None
+      }
+    }
+
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> {
+      let name = self.name();
+      let val = self.value_str();
+      match val
+        { Some(v) => Some((name, v)) 
+        , _ => None 
+        }
+    }
+
+    fn span(&self) -> Span { self.span }
+}
+
+// These next two are annoying, but required
+impl AttrMetaMethods for P<ReifiedMetaItem> {
+    fn name(&self) -> InternedString { (**self).name() }
+    fn value_str(&self) -> Option<InternedString> { (**self).value_str() }
+    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+        (**self).meta_item_list()
+    }
+    fn is_name(&self)   -> bool { (**self).is_name() }
+    fn is_assign(&self) -> bool { (**self).is_assign() }
+    fn is_list(&self)   -> bool { (**self).is_list() }
+
+    fn maybe_word(&self)   -> Option<InternedString> { (**self).maybe_word() }
+    fn maybe_assign(&self) -> Option<(InternedString, InternedString)> 
+    { (**self).maybe_assign() }
+
+    fn span(&self) -> Span { (**self).span() }
+}
+
 impl AttrMetaMethods for P<MetaItem> {
     fn name(&self) -> InternedString { (**self).name() }
     fn value_str(&self) -> Option<InternedString> { (**self).value_str() }
@@ -200,18 +431,17 @@ impl AttrMetaMethods for P<MetaItem> {
 }
 
 
+
+//-----------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------
+// TODO: FIX ALL OF THIS
+/*
 pub trait AttributeMethods {
-    fn meta(&self) -> &MetaItem;
-    fn with_desugared_doc<T, F>(&self, f: F) -> T where
+fn with_desugared_doc<T, F>(&self, f: F) -> T where
         F: FnOnce(&Attribute) -> T;
 }
 
 impl AttributeMethods for Attribute {
-    /// Extract the MetaItem from inside this Attribute.
-    fn meta(&self) -> &MetaItem {
-        &self.node.value
-    }
-
     /// Convert self to a normal #[doc="foo"] comment, if it is a
     /// comment like `///` or `/** */`. (Returns self unchanged for
     /// non-sugared doc attributes.)
@@ -255,6 +485,59 @@ pub fn mk_list_item(name: InternedString, items: Vec<P<MetaItem>>) -> P<MetaItem
 pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
     P(dummy_spanned(MetaItemKind::Word(name)))
 }
+*/
+
+//-----------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------
+
+// Setting up structures for attribute IDs to track their usages.
+thread_local! { static NEXT_ATTR_ID: Cell<usize> = Cell::new(0) }
+
+pub fn mk_attr_id() -> AttrId {
+    let id = NEXT_ATTR_ID.with(|slot| {
+        let r = slot.get();
+        slot.set(r + 1);
+        r
+    });
+    AttrId(id)
+}
+
+/// Returns an inner attribute with the given value.
+pub fn mk_attr_inner(id: AttrId, item: P<ReifiedAttr>) -> Attribute {
+  dummy_spanned(Attribute_ {
+      id: id,
+      style: ast::AttrStyle::Inner,
+      path : (*item).path(),  
+      stream: (*item).recover_tokenstream(),
+      is_sugared_doc: false,
+  })
+}
+
+/// Returns an outer attribute with the given value.
+pub fn mk_attr_outer(id: AttrId, item: P<ReifiedAttr>) -> Attribute {
+    dummy_spanned(Attribute_ {
+        id: id,
+        style: ast::AttrStyle::Outer,
+        path : (*item).path(),  
+        stream: (*item).recover_tokenstream(),
+        is_sugared_doc: false,
+    })
+}
+
+pub fn mk_sugared_doc_attr(id: AttrId, text: InternedString, lo: BytePos,
+                           hi: BytePos)
+                           -> Attribute {
+    let style = doc_comment_style(&text);
+    let lit = spanned(lo, hi, ast::LitKind::Str(text, ast::StrStyle::Cooked));
+    let attr = Attribute_ {
+        id: id,
+        style: style,
+        path : ast::Path::from_ident(mk_sp(lo, hi), str_to_ident("doc")),
+        stream : tokenstream::TokenStream::from_ast_lit_str(lit),
+        is_sugared_doc: true
+    };
+    spanned(lo, hi, attr)
+}
 
 fn pretty_print_args(args: &[&str]) -> String {
   let mut comma_sep = String::new();
@@ -272,7 +555,10 @@ fn pretty_print_args(args: &[&str]) -> String {
 	comma_sep
 }
 
-fn to_assign_map(diagnostic: &Handler, expected_names : &[&str], metas : &[P<MetaItem>]) 
+/* Searchin (via heapify) */
+/// Converts the Reified MetaItems into a HashMap that contains the expected names.
+/// If the items contain extra names or duplicates, diagnostics receives an error instead.
+fn to_assign_map(diagnostic: &Handler, expected_names : &[&str], metas : &[ReifiedMetaItem]) 
                  -> Option<HashMap<String, InternedString>> {
   let mut metamap : HashMap<String, InternedString> = HashMap::new();
 
@@ -303,59 +589,13 @@ fn to_assign_map(diagnostic: &Handler, expected_names : &[&str], metas : &[P<Met
   Some(metamap)
 }
 
-// Setting up structures for attribute IDs to track their usages.
-thread_local! { static NEXT_ATTR_ID: Cell<usize> = Cell::new(0) }
-
-pub fn mk_attr_id() -> AttrId {
-    let id = NEXT_ATTR_ID.with(|slot| {
-        let r = slot.get();
-        slot.set(r + 1);
-        r
-    });
-    AttrId(id)
-}
-
-/// Returns an inner attribute with the given value.
-pub fn mk_attr_inner(id: AttrId, item: P<MetaItem>) -> Attribute {
-    dummy_spanned(Attribute_ {
-        id: id,
-        style: ast::AttrStyle::Inner,
-        value: item,
-        is_sugared_doc: false,
-    })
-}
-
-/// Returns an outer attribute with the given value.
-pub fn mk_attr_outer(id: AttrId, item: P<MetaItem>) -> Attribute {
-    dummy_spanned(Attribute_ {
-        id: id,
-        style: ast::AttrStyle::Outer,
-        value: item,
-        is_sugared_doc: false,
-    })
-}
-
-pub fn mk_sugared_doc_attr(id: AttrId, text: InternedString, lo: BytePos,
-                           hi: BytePos)
-                           -> Attribute {
-    let style = doc_comment_style(&text);
-    let lit = spanned(lo, hi, ast::LitKind::Str(text, ast::StrStyle::Cooked));
-    let attr = Attribute_ {
-        id: id,
-        style: style,
-        value: P(spanned(lo, hi, MetaItemKind::NameValue(InternedString::new("doc"), lit))),
-        is_sugared_doc: true
-    };
-    spanned(lo, hi, attr)
-}
-
 /* Searching */
 /// Check if `needle` occurs in `haystack` by a structural
 /// comparison. This is slightly subtle, and relies on ignoring the
 /// span included in the `==` comparison a plain MetaItem.
 pub fn contains(haystack: &[P<MetaItem>], needle: &MetaItem) -> bool {
     debug!("attr::contains (name={})", needle.name());
-    haystack.iter().any(|item| {
+    haystack.iter().any(|&item| {
         debug!("  testing: {}", item.name());
         item.node == needle.node
     })
@@ -372,8 +612,8 @@ pub fn contains_name<AM: AttrMetaMethods>(metas: &[AM], name: &str) -> bool {
 pub fn first_attr_value_str_by_name(attrs: &[Attribute], name: &str)
                                  -> Option<InternedString> {
     attrs.iter()
-        .find(|at| at.check_name(name))
-        .and_then(|at| at.value_str())
+         .find(|at| at.check_name(name))
+         .and_then(|at| at.value_str())
 }
 
 // This never gets called
@@ -387,26 +627,27 @@ pub fn first_attr_value_str_by_name(attrs: &[Attribute], name: &str)
 
 /* Higher-level applications */
 
-pub fn sort_meta_items(items: Vec<P<MetaItem>>) -> Vec<P<MetaItem>> {
-    // This is sort of stupid here, but we need to sort by
-    // human-readable strings.
-    let mut v = items.into_iter()
-        .map(|mi| (mi.name(), mi))
-        .collect::<Vec<(InternedString, P<MetaItem>)>>();
-
-    v.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
-
-    // There doesn't seem to be a more optimal way to do this
-    v.into_iter().map(|(_, m)| m.map(|Spanned {node, span}| {
-        Spanned {
-            node: match node {
-                MetaItemKind::List(n, mis) => MetaItemKind::List(n, sort_meta_items(mis)),
-                _ => node
-            },
-            span: span
-        }
-    })).collect()
-}
+// This never gets called
+// pub fn sort_meta_items(items: Vec<P<MetaItem>>) -> Vec<P<MetaItem>> {
+//     // This is sort of stupid here, but we need to sort by
+//     // human-readable strings.
+//     let mut v = items.into_iter()
+//         .map(|mi| (mi.name(), mi))
+//         .collect::<Vec<(InternedString, P<MetaItem>)>>();
+// 
+//     v.sort_by(|&(ref a, _), &(ref b, _)| a.cmp(b));
+// 
+//     // There doesn't seem to be a more optimal way to do this
+//     v.into_iter().map(|(_, m)| m.map(|Spanned {node, span}| {
+//         Spanned {
+//             node: match node {
+//                 MetaItemKind::List(n, mis) => MetaItemKind::List(n, sort_meta_items(mis)),
+//                 _ => node
+//             },
+//             span: span
+//         }
+//     })).collect()
+// }
 
 pub fn find_crate_name(attrs: &[Attribute]) -> Option<InternedString> {
     first_attr_value_str_by_name(attrs, "crate_name")
@@ -584,16 +825,28 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
             continue // not a stability level
         }
 
-        mark_used(attr);
+        let rattr = attr.to_reified_attr();
+        if rattr.is_none() {
+            diagnostic.span_err(attr.span(), &format!("invalid attribute '{:?}'", attr));
+            continue 'outer
+        }
+        let attr = rattr.unwrap();
+        mark_reified_used(&attr);
 
         if let Some(metas) = attr.meta_item_list() {
+          let rmetas = reify_metaitem_list(metas);
+          if rmetas.is_none() { 
+            diagnostic.span_err(attr.span(), &format!("invalid argument list for '{:?}'", attr));
+            continue 'outer
+          }
+          let metas = rmetas.unwrap();
           match tag {
             "rustc_deprecated" => {
               if rustc_depr.is_some() {
                 diagnostic.span_err(item_sp, "multiple rustc_deprecated attributes");
                 break
               }
-              if let Some(mut map) = to_assign_map(diagnostic, &["since", "reason"], metas) {
+              if let Some(mut map) = to_assign_map(diagnostic,&["since", "reason"],&metas) {
                 let since  = map.remove("since");
                 let reason = map.remove("reason");
                 match (since, reason) {
@@ -618,8 +871,7 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
                 diagnostic.span_err(item_sp, "multiple stability levels");
                 break
               }
-              if let Some(mut map) = to_assign_map(diagnostic, 
-                                                   &["feature", "reason", "issue"], metas) {
+              if let Some(mut map) = to_assign_map(diagnostic,&["feature", "reason", "issue"],&metas) {
                 let feature = map.remove("feature");
                 let reason  = map.remove("reason");
                 let issue   = map.remove("issue");
@@ -653,7 +905,7 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
                 diagnostic.span_err(item_sp, "multiple stability levels");
                 break
               }
-              if let Some(mut map) = to_assign_map(diagnostic, &["feature", "since"], metas) {
+              if let Some(mut map) = to_assign_map(diagnostic,&["feature", "since"],&metas) {
                 let feature = map.remove("feature");
                 let since   = map.remove("since");
                 match (feature, since) {
@@ -705,57 +957,44 @@ fn find_deprecation_generic<'a, I>(diagnostic: &Handler,
                                    -> Option<Deprecation>
     where I: Iterator<Item = &'a Attribute>
 {
-    let mut depr: Option<Deprecation> = None;
+  let mut depr: Option<Deprecation> = None;
 
-    'outer: for attr in attrs_iter {
-        if attr.name() != "deprecated" {
-            continue
-        }
-
-        mark_used(attr);
-
-        if depr.is_some() {
-            diagnostic.span_err(item_sp, "multiple deprecated attributes");
-            break
-        }
-
-        depr = if let Some(metas) = attr.meta_item_list() {
-            let get = |meta: &MetaItem, item: &mut Option<InternedString>| {
-                if item.is_some() {
-                    diagnostic.span_err(meta.span, &format!("multiple '{}' items",
-                                                             meta.name()));
-                    return false
-                }
-                if let Some(v) = meta.value_str() {
-                    *item = Some(v);
-                    true
-                } else {
-                    diagnostic.span_err(meta.span, "incorrect meta item");
-                    false
-                }
-            };
-
-            let mut since = None;
-            let mut note = None;
-            for meta in metas {
-                match &*meta.name() {
-                    "since" => if !get(meta, &mut since) { continue 'outer },
-                    "note" => if !get(meta, &mut note) { continue 'outer },
-                    _ => {
-                        diagnostic.span_err(meta.span, &format!("unknown meta item '{}'",
-                                                                meta.name()));
-                        continue 'outer
-                    }
-                }
-            }
-
-            Some(Deprecation {since: since, note: note})
-        } else {
-            Some(Deprecation{since: None, note: None})
-        }
+  'outer: for attr in attrs_iter {
+    if attr.name() != "deprecated" {
+        continue
     }
 
-    depr
+    let rattr = attr.to_reified_attr();
+    if rattr.is_none() {
+        diagnostic.span_err(attr.span(), &format!("invalid attribute '{:?}'", attr));
+        continue 'outer
+    }
+    let attr = rattr.unwrap();
+    mark_reified_used(&attr);
+
+    if depr.is_some() {
+        diagnostic.span_err(item_sp, "multiple deprecated attributes");
+        break
+    }
+
+    if let Some(metas) = attr.meta_item_list() {
+      let rmetas = reify_metaitem_list(metas);
+      if rmetas.is_none() { 
+        diagnostic.span_err(attr.span(), &format!("invalid argument list for '{:?}'", attr));
+        continue 'outer
+      }
+      let metas = rmetas.unwrap();
+    
+      if let Some(mut map) = to_assign_map(diagnostic,&["since", "note"],&metas) {
+        let since = map.remove("since");
+        let note  = map.remove("note");
+        depr = Some(Deprecation {since : since, note : note});
+      } else { // to_assign_map has already produced the necessary diagnostic information
+        continue 'outer
+      }
+    }
+  }  
+  depr
 }
 
 /// Find the first stability attribute. `None` if none exists.

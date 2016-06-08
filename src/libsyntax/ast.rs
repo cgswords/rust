@@ -16,13 +16,15 @@ pub use self::ViewPath_::*;
 pub use self::PathParameters::*;
 
 use attr::{ThinAttributes, HasAttrs};
-use codemap::{mk_sp, respan, Span, Spanned, DUMMY_SP, ExpnId};
+use codemap::{mk_sp, respan, Span, Spanned, DUMMY_SP, ExpnId, dummy_spanned};
 use abi::Abi;
 use errors;
-use parse::token::{self, keywords, InternedString};
+use ext::quote;
+use parse::token::{self, keywords, InternedString, Token, intern, str_to_ident};
+use parse::token::Lit as PLit;
 use print::pprust;
 use ptr::P;
-use tokenstream::{TokenTree};
+use tokenstream::{TokenTree, TokenStream, tts_to_ts, ts_to_tts};
 
 use std::fmt;
 use std::rc::Rc;
@@ -218,6 +220,16 @@ impl Path {
                 }
             ),
         }
+    }
+
+    pub fn get_last_ident(&self) -> Ident {
+      let segs = (*self).segments;
+      if segs.len() < 1 { panic!("Invalid path"); }
+      if let Some(seg) = segs.last() {
+        seg.identifier
+      } else {
+        panic!("No identifier found.")
+      }
     }
 }
 
@@ -490,40 +502,234 @@ pub struct Crate {
     pub exported_macros: Vec<MacroDef>,
 }
 
+/// Meta-data associated with an item
+pub type Attribute = Spanned<Attribute_>;
+
+/// Distinguishes between Attributes that decorate items and Attributes that
+/// are contained as statements within items. These two cases need to be
+/// distinguished for pretty-printing.
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
+pub enum AttrStyle {
+    Outer,
+    Inner,
+}
+
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
+pub struct AttrId(pub usize);
+
+/// Doc-comments are promoted to attributes that have is_sugared_doc = true
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+pub struct Attribute_ {
+    pub id: AttrId,
+    pub style: AttrStyle,
+    pub path: Path,
+    pub stream: TokenStream,
+    pub is_sugared_doc: bool,
+}
+
+impl Attribute {
+  pub fn to_reified_attr(&self) -> Option<ReifiedAttr> {
+    let span   = self.span;
+    let id     = self.node.id;
+    let path   = self.node.path;
+    let stream = self.node.stream;
+
+    if stream.is_empty() {
+      Some(Spanned { node : ReifiedAttr_::Word(id,path), span : span})
+    } else if stream.is_assignment() {
+      if let Some(rhs) = stream.maybe_assignment() {
+        if let Some(lit) = rhs.maybe_lit() {
+          match lit {
+            PLit::Str_(name) => {
+              // TODO Figure out how to get the span for the string literal
+              let lit = dummy_spanned(LitKind::Str(token::InternedString::new_from_name(name),
+                                      StrStyle::Cooked));
+              Some(Spanned { node : ReifiedAttr_::Assign(id, path, lit), span : span})
+            }
+            _ => None,
+          }
+        } else { None }
+      } else { None }
+    } else if stream.is_delimited() {
+      if let Some(ls) = stream.maybe_comma_list() {
+        let mut items : Vec<MetaItem> = Vec::new();
+        for l in ls {
+          if let Some(item) = l.maybe_metaitem() {
+            items.push(item);
+          } else {
+            return None;
+          }
+        }
+        Some(Spanned { node : ReifiedAttr_::List(id, path, items), span : span})
+     } else { None }
+    } else { None }
+  }
+}
+
+pub type ReifiedAttr = Spanned<ReifiedAttr_>;
+
+
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+pub enum ReifiedAttr_ {
+  Word(AttrId,Path),
+  Assign(AttrId,Path,Lit),
+  List(AttrId,Path, Vec<MetaItem>) // no point to be pointers, since we only hold them here.
+}
+
+impl ReifiedAttr {
+  pub fn path(&self) -> Path {
+     match self.node { 
+       ReifiedAttr_::Word(_,p) | ReifiedAttr_::Assign(_,p,_) | ReifiedAttr_::List(_,p,_) => p 
+     }
+  }
+  
+  pub fn recover_tokenstream(&self) -> TokenStream {
+    match self.node {
+      ReifiedAttr_::Word(_,_) => tts_to_ts(vec![]),
+      ReifiedAttr_::Assign(_,_,l) => TokenStream::from_ast_lit_str(l),
+      ReifiedAttr_::List(_,_,ls) => {
+        if ls.len() == 0 { return tts_to_ts(vec![]) }
+
+        let mut tts = Vec::new();
+        tts.append(&mut ls[0].to_tts());
+        for l in ls.iter().skip(1) {
+          tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+          let mut ttset = l.to_tts();
+          tts.append(&mut ttset);
+        }
+        tts_to_ts(tts)
+      }
+    }
+  }
+}
+
+/// MetaItems live in an attribute
 pub type MetaItem = Spanned<MetaItemKind>;
 
-#[derive(Clone, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
-pub enum MetaItemKind {
-    Word(InternedString),
-    List(InternedString, Vec<P<MetaItem>>),
-    NameValue(InternedString, Lit),
+// PartailEq is current "broken"; it should check things about the set-ness of the
+// TokenStream (see previous implementation below)
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+pub struct MetaItemKind {
+    pub name   : InternedString,
+    pub stream : TokenStream
 }
 
-// can't be derived because the MetaItemKind::List requires an unordered comparison
-impl PartialEq for MetaItemKind {
-    fn eq(&self, other: &MetaItemKind) -> bool {
-        use self::MetaItemKind::*;
-        match *self {
-            Word(ref ns) => match *other {
-                Word(ref no) => (*ns) == (*no),
-                _ => false
-            },
-            NameValue(ref ns, ref vs) => match *other {
-                NameValue(ref no, ref vo) => {
-                    (*ns) == (*no) && vs.node == vo.node
-                }
-                _ => false
-            },
-            List(ref ns, ref miss) => match *other {
-                List(ref no, ref miso) => {
-                    ns == no &&
-                        miss.iter().all(|mi| miso.iter().any(|x| x.node == mi.node))
-                }
-                _ => false
+impl MetaItem {
+  pub fn to_reified_metaitem(&self) -> Option<ReifiedMetaItem> {
+    let span = self.span;
+    let name = self.node.name;
+    let stream = self.node.stream;
+
+    if stream.is_empty() {
+      Some(Spanned { node : ReifiedMetaItem_::Word(name), span : span})
+    } else if stream.is_assignment() {
+      if let Some(rhs) = stream.maybe_assignment() {
+        if let Some(lit) = rhs.maybe_lit() {
+          match lit {
+            PLit::Str_(arg) => {
+              let lit = dummy_spanned(LitKind::Str(token::InternedString::new_from_name(arg), StrStyle::Cooked));
+              Some(Spanned { node : ReifiedMetaItem_::Assign(name, lit), span : span})
             }
+            _ => None,
+          }
+        } else { None }
+      } else { None }
+    } else if stream.is_delimited() {
+      if let Some(ls) = stream.maybe_comma_list() {
+        let mut items : Vec<MetaItem> = Vec::new();
+        for l in ls {
+          if let Some(item) = l.maybe_metaitem() {
+            items.push(item);
+          } else {
+            return None;
+          }
         }
-    }
+        Some(Spanned { node : ReifiedMetaItem_::List(name, items), span : span})
+     } else { None }
+    } else { None }
+  }
+
+  pub fn to_tts(&self) -> Vec<TokenTree> {
+    let mut tts = ts_to_tts(TokenStream::from_interned_string_as_ident(self.node.name));
+    let mut stream_tokens = self.node.stream.to_trees();
+    tts.append(&mut stream_tokens);
+    tts
+  }
 }
+
+pub fn reify_metaitem_list(items : &[P<MetaItem>]) -> Option<Vec<ReifiedMetaItem>> {
+  let mut res = Vec::new();
+  for m in items {
+    let rmi = m.to_reified_metaitem();
+    match rmi {
+      Some(m) => { res.push(m); },
+      None => { return None; }
+    }
+  }
+  Some(res)
+}
+
+
+pub type ReifiedMetaItem = Spanned<ReifiedMetaItem_>;
+
+#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+pub enum ReifiedMetaItem_ {
+  Word(InternedString),
+  Assign(InternedString,Lit),
+  List(InternedString,Vec<MetaItem>)
+}
+
+impl ReifiedMetaItem {
+  pub fn name(&self) -> InternedString {
+     match self.node { 
+       ReifiedMetaItem_::Word(n) | ReifiedMetaItem_::Assign(n, _) | ReifiedMetaItem_::List(n, _) => n
+     }
+  }
+  
+  pub fn recover_tokenstream(&self) -> TokenStream {
+    match self.node {
+      ReifiedMetaItem_::Word(_) => tts_to_ts(vec![]),
+      ReifiedMetaItem_::Assign(_, l) => TokenStream::from_ast_lit_str(l),
+      ReifiedMetaItem_::List(_, ls) => {
+        if ls.len() == 0 { return tts_to_ts(vec![]) }
+
+        let mut tts = Vec::new();
+        tts.append(&mut ls[0].to_tts());
+        for l in ls.iter().skip(1) {
+          tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+          tts.append(&mut l.to_tts());
+        }
+        tts_to_ts(tts)
+      }
+    }
+  }
+}
+
+// // can't be derived because the MetaItemKind::List requires an unordered comparison
+// impl PartialEq for MetaItemKind {
+//     fn eq(&self, other: &MetaItemKind) -> bool {
+//         use self::MetaItemKind::*;
+//         match *self {
+//             Word(ref ns) => match *other {
+//                 Word(ref no) => (*ns) == (*no),
+//                 _ => false
+//             },
+//             NameValue(ref ns, ref vs) => match *other {
+//                 NameValue(ref no, ref vo) => {
+//                     (*ns) == (*no) && vs.node == vo.node
+//                 }
+//                 _ => false
+//             },
+//             List(ref ns, ref miss) => match *other {
+//                 List(ref no, ref miso) => {
+//                     ns == no &&
+//                         miss.iter().all(|mi| miso.iter().any(|x| x.node == mi.node))
+//                 }
+//                 _ => false
+//             }
+//         }
+//     }
+// }
 
 #[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
 pub struct Block {
@@ -1711,30 +1917,6 @@ pub enum ViewPath_ {
 
     /// `foo::bar::{a,b,c}`
     ViewPathList(Path, Vec<PathListItem>)
-}
-
-/// Meta-data associated with an item
-pub type Attribute = Spanned<Attribute_>;
-
-/// Distinguishes between Attributes that decorate items and Attributes that
-/// are contained as statements within items. These two cases need to be
-/// distinguished for pretty-printing.
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
-pub enum AttrStyle {
-    Outer,
-    Inner,
-}
-
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug, Copy)]
-pub struct AttrId(pub usize);
-
-/// Doc-comments are promoted to attributes that have is_sugared_doc = true
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
-pub struct Attribute_ {
-    pub id: AttrId,
-    pub style: AttrStyle,
-    pub value: P<MetaItem>,
-    pub is_sugared_doc: bool,
 }
 
 /// TraitRef's appear in impls.

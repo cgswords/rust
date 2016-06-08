@@ -8,13 +8,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use ast::{self, AttrStyle};
-use codemap::{self, Span, mk_sp};
+use ast::{self, AttrStyle, LitKind, MetaItemKind};
+use codemap::{self, Span, mk_sp, Spanned, DUMMY_SP};
 use ext::base;
 use ext::tt::macro_parser;
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
 use parse::lexer;
-use parse::token::{self, Token};
+use parse;
+use parse::token::{self, Token, Lit, intern_and_get_ident, str_to_ident, InternedString};
+use parse::token::Lit as PLit;
 use std::rc::Rc;
 
 /// # Token Trees
@@ -260,6 +262,10 @@ pub fn tts_to_ts (trees : Vec<TokenTree>) -> TokenStream {
   TokenStream { trees : trees, span : span }
 }
 
+pub fn ts_to_tts(stream : TokenStream) -> Vec<TokenTree> {
+  stream.trees.clone()
+}
+
 /// TokenStream operators include basic destructuring, boolean operations, `maybe_...`
 /// operations, and `maybe_..._prefix` operations. Boolean operations are straightforward,
 /// indicating information about the structure of the stream. The `maybe_...` operations
@@ -271,7 +277,24 @@ pub fn tts_to_ts (trees : Vec<TokenTree>) -> TokenStream {
 ///
 ///    `maybe_path_prefix("a::b::c(a,b,c).foo()") -> (a::b::c, "(a,b,c).foo()")`
 impl TokenStream {
- 
+
+  pub fn from_ast_lit_str(lit : ast::Lit) -> TokenStream {
+    match lit.node
+    { LitKind::Str(val, _) => {
+        let val = PLit::Str_(token::intern(&val[..]));
+        tts_to_ts(vec![TokenTree::Token(lit.span, Token::Literal(val, None))])
+      }
+      _ => panic!("Invalid literal '{:?}', expected string", lit)  
+    }
+    
+  }
+
+  pub fn from_interned_string_as_ident(s : InternedString) -> TokenStream {
+    tts_to_ts(vec![TokenTree::Token(DUMMY_SP,Token::Ident(token::str_to_ident(&s[..])))])
+  }
+
+  pub fn to_trees(&self) -> Vec<TokenTree> { self.trees.clone() }
+
   /// Returns with the first tree of the stream (if one exists)
   pub fn first_tree(&self) -> Option<TokenTree> {
     if (*self).trees.len() > 1 { Some((*self).trees[0].clone()) } else { None }
@@ -399,6 +422,17 @@ impl TokenStream {
     Some(res)
   }
 
+  /// Convert a tokenstream to a metaitem
+  pub fn maybe_metaitem(&self) -> Option<ast::MetaItem> {
+    let sp = (*self).span;
+    if let Some((id, ts)) = (*self).maybe_ident_prefix() {
+      let name = intern_and_get_ident(&id.name.as_str()[..]);
+      Some(Spanned { node : MetaItemKind { name : name
+                                         , stream : ts }
+                   , span : sp })
+    } else { None }
+  }
+
   /// Returns an identifier
   pub fn maybe_ident(&self) -> Option<ast::Ident> {
     if !((*self).trees.len() == 1) { return None; }
@@ -418,6 +452,21 @@ impl TokenStream {
     match tt
       { TokenTree::Token(_, Token::Literal(l,_)) => Some(l)
       , _                                        => None
+      }
+  }
+
+  /// Returns a string literal
+  pub fn maybe_str_ast_lit(&self) -> Option<ast::Lit> {
+    if !((*self).trees.len() == 1) { return None; }
+
+    let tt = (*self).trees[0].clone();
+    match tt
+      { TokenTree::Token(_, Token::Literal(Lit::Str_(s),_)) => {
+          let l = LitKind::Str(token::intern_and_get_ident(&parse::str_lit(&s.as_str())),
+                               ast::StrStyle::Cooked);
+          Some(Spanned { node : l , span : (*self).span})
+        }
+        _ => None
       }
   }
 
