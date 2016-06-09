@@ -225,11 +225,13 @@ impl TokenTree {
 /// struct itself shouldn't be directly manipulated; the internal structure is not stable,
 /// and may be changed at any time in the future. The operators will not, however (except
 /// for signatures, later on).
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
-pub struct TokenStream 
-  { trees : Vec<TokenTree>
-  , span  : Span
-  }
+// #[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+// pub struct TokenStream 
+//   { trees : Vec<TokenTree>
+//   , span  : Span
+//   }
+
+pub type TokenStream = Spanned<Vec<TokenTree>>;
 
 pub fn compute_trees_span(trees : &[TokenTree]) -> Span {
   if trees.len() < 1 { return codemap::DUMMY_SP; }
@@ -259,11 +261,11 @@ pub fn compute_trees_span(trees : &[TokenTree]) -> Span {
 #[inline(always)]
 pub fn tts_to_ts (trees : Vec<TokenTree>) -> TokenStream {
   let span = compute_trees_span(&trees);
-  TokenStream { trees : trees, span : span }
+  Spanned { node : trees, span : span }
 }
 
 pub fn ts_to_tts(stream : TokenStream) -> Vec<TokenTree> {
-  stream.trees.clone()
+  stream.node.clone()
 }
 
 /// TokenStream operators include basic destructuring, boolean operations, `maybe_...`
@@ -293,18 +295,18 @@ impl TokenStream {
     tts_to_ts(vec![TokenTree::Token(DUMMY_SP,Token::Ident(token::str_to_ident(&s[..])))])
   }
 
-  pub fn to_trees(&self) -> Vec<TokenTree> { self.trees.clone() }
+  pub fn to_trees(&self) -> Vec<TokenTree> { self.node.clone() }
 
   /// Returns with the first tree of the stream (if one exists)
   pub fn first_tree(&self) -> Option<TokenTree> {
-    if (*self).trees.len() > 1 { Some((*self).trees[0].clone()) } else { None }
+    if (*self).node.len() > 1 { Some((*self).node[0].clone()) } else { None }
   }
 
   /// Drops the first tree of the stream
   pub fn drop_first_tree(&self) -> Option<TokenStream> {
-    if (*self).trees.len() < 1 { return None; }
+    if (*self).node.len() < 1 { return None; }
 
-    let mut local_trees = (*self).trees.clone();
+    let mut local_trees = (*self).node.clone();
     let tts             = local_trees.split_off(1);
 
     Some(tts_to_ts(tts))
@@ -313,9 +315,9 @@ impl TokenStream {
   /// If the underlying stream has at least two elements, you'll get back the head and
   /// tail as new `TokenStream`s.
   pub fn unwind_cons(&self)     -> (Option<(TokenStream, TokenStream)>) {
-    if (*self).trees.len() < 1 { return None; }
+    if (*self).node.len() < 1 { return None; }
 
-    let mut tts = (*self).trees.clone();
+    let mut tts = (*self).node.clone();
     let rst_tts = tts.split_off(1);
     let fst     = tts[0].clone();
 
@@ -323,14 +325,14 @@ impl TokenStream {
   }
 
   /// Indicates whether the `TokenStream` is empty.
-  pub fn is_empty(&self) -> bool { self.trees.len() == 0 }
+  pub fn is_empty(&self) -> bool { self.node.len() == 0 }
 
   /// Indicates where the stream is of the form `= <ts>`, where `<ts>` is a continued
   /// `TokenStream`.
   pub fn is_assignment(&self) -> bool {
-    if !((*self).trees.len() > 1) { return false; }
+    if !((*self).node.len() > 1) { return false; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Eq) => true
       , _                              => false
@@ -340,9 +342,9 @@ impl TokenStream {
   /// Indicatees where the stream is a single, delimited expression (e.g., `(a,b,c)` or
   /// `{a,b,c}`).
   pub fn is_delimited(&self) -> bool {
-    if !((*self).trees.len() == 1) { return false; }
+    if !((*self).node.len() == 1) { return false; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Delimited(_, _) => true
       , _                          => false
@@ -351,9 +353,9 @@ impl TokenStream {
  
   /// Indicates if the stream is exactly one literal
   pub fn is_lit(&self) -> bool {
-    if !((*self).trees.len() == 1) { return false; }
+    if !((*self).node.len() == 1) { return false; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Literal(_,_)) => true
       , _                                  => false
@@ -362,9 +364,9 @@ impl TokenStream {
   
   /// Indicates if the stream is exactly one identifier
   pub fn is_ident(&self) -> bool {
-    if !((*self).trees.len() == 1) { return false; }
+    if !((*self).node.len() == 1) { return false; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Ident(_)) => true
       , _                                    => false
@@ -380,9 +382,9 @@ impl TokenStream {
 
   /// Returns the inside of the delimited term as a new TokenStream.
   pub fn maybe_delimited(&self) -> Option<TokenStream> {
-    if !((*self).trees.len() == 1) { return None; }
+    if !((*self).node.len() == 1) { return None; }
 
-    match (*self).trees[0]
+    match (*self).node[0]
       { TokenTree::Delimited(_, ref rc) => {
           let trees : Vec<TokenTree> = (*rc).tts.clone();
           Some(tts_to_ts(trees))
@@ -398,7 +400,7 @@ impl TokenStream {
 
     let mut ts : Vec<TokenTree>;
     match maybe_tts
-      { Some(t) => { ts = t.trees.clone(); }
+      { Some(t) => { ts = t.node.clone(); }
       , None    => { return None; }
       }
 
@@ -435,9 +437,9 @@ impl TokenStream {
 
   /// Returns an identifier
   pub fn maybe_ident(&self) -> Option<ast::Ident> {
-    if !((*self).trees.len() == 1) { return None; }
+    if !((*self).node.len() == 1) { return None; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Ident(t)) => Some(t)
       , _                                    => None
@@ -446,9 +448,9 @@ impl TokenStream {
 
   /// Returns a literal
   pub fn maybe_lit(&self) -> Option<token::Lit> {
-    if !((*self).trees.len() == 1) { return None; }
+    if !((*self).node.len() == 1) { return None; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Literal(l,_)) => Some(l)
       , _                                        => None
@@ -457,9 +459,9 @@ impl TokenStream {
 
   /// Returns a string literal
   pub fn maybe_str_ast_lit(&self) -> Option<ast::Lit> {
-    if !((*self).trees.len() == 1) { return None; }
+    if !((*self).node.len() == 1) { return None; }
 
-    let tt = (*self).trees[0].clone();
+    let tt = (*self).node[0].clone();
     match tt
       { TokenTree::Token(_, Token::Literal(Lit::Str_(s),_)) => {
           let l = LitKind::Str(token::intern_and_get_ident(&parse::str_lit(&s.as_str())),
@@ -498,7 +500,7 @@ impl TokenStream {
 
   /// Returns a non-global path prefix
   pub fn maybe_path_prefix(&self) -> Option<(ast::Path, TokenStream)> {
-    let mut tts = (*self).trees.clone();
+    let mut tts = (*self).node.clone();
     tts.reverse();
     let mut segments : Vec<ast::PathSegment> = Vec::new();
     let lo_span;

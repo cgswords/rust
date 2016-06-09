@@ -480,9 +480,14 @@ pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
 //     P(dummy_spanned(MetaItemKind::NameValue(name, value)))
 // }
 
-pub fn mk_list_item(name: InternedString, items: Vec<MetaItem>) -> P<MetaItem> {
+pub fn mk_unpointered_list_item(name: InternedString, items: Vec<MetaItem>) -> P<MetaItem> {
   P(dummy_spanned(MetaItemKind { name : name
                                , stream : ReifiedMetaItem::recover_vec_tokenstream(items) }))
+}
+
+pub fn mk_list_item(name: InternedString, items: Vec<P<MetaItem>>) -> P<MetaItem> {
+  P(dummy_spanned(MetaItemKind { name : name
+                               , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items) }))
 }
 
 pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
@@ -490,6 +495,26 @@ pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
                                , stream : tokenstream::tts_to_ts(vec![])
                                }))
 }
+
+pub fn mk_spanned_word_item(span : Span, name: InternedString) -> P<MetaItem> {
+  P(Spanned { node : MetaItemKind { name : name , stream : tokenstream::tts_to_ts(vec![]) }
+            , span : span})
+}
+
+pub fn mk_spanned_list_item(span : Span, name: InternedString, items: Vec<P<MetaItem>>) 
+                            -> P<MetaItem> {
+  P(Spanned { node : MetaItemKind { name : name
+                                   , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items) }
+            , span : span})
+}
+
+pub fn mk_spanned_item_from_stream(span : Span, name: InternedString, 
+                                                stream : tokenstream::TokenStream) 
+                                                -> P<MetaItem> {
+  P(Spanned { node : MetaItemKind { name : name , stream : stream }
+            , span : span})
+}
+
 
 
 //-----------------------------------------------------------------------------------
@@ -508,27 +533,49 @@ pub fn mk_attr_id() -> AttrId {
 }
 
 /// Returns an inner attribute with the given value.
-pub fn mk_attr_inner(id: AttrId, item: P<ReifiedAttr>) -> Attribute {
-  dummy_spanned(Attribute_ {
-      id: id,
-      style: ast::AttrStyle::Inner,
-      path : (*item).path(),  
-      stream: (*item).recover_tokenstream(),
-      is_sugared_doc: false,
-  })
+pub fn mk_attr_inner(id: AttrId, item: P<MetaItem>) -> Attribute {
+  mk_attr(id, item, ast::AttrStyle::Inner)
 }
 
 /// Returns an outer attribute with the given value.
-pub fn mk_attr_outer(id: AttrId, item: P<ReifiedAttr>) -> Attribute {
+pub fn mk_attr_outer(id: AttrId, item: P<MetaItem>) -> Attribute {
+  mk_attr(id, item, ast::AttrStyle::Outer)
+}
+
+/// Returns a new attribute with the appropriate style
+pub fn mk_attr(id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) -> Attribute {
     dummy_spanned(Attribute_ {
         id: id,
-        style: ast::AttrStyle::Outer,
-        path : (*item).path(),  
-        stream: (*item).recover_tokenstream(),
+        style: style,
+        path : ast::Path::from_ident((&item).span, str_to_ident(&(*item).name()[..])),  
+        stream: (&item).node.stream,
         is_sugared_doc: false,
     })
 }
 
+/// Returns a new attribute with the appropriate style
+pub fn mk_spanned_attr(span : Span, id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) 
+                       -> Attribute {
+    Spanned { node : Attribute_ {
+                       id: id,
+                       style: style,
+                       path : ast::Path::from_ident((&item).span, str_to_ident(&(*item).name()[..])),  
+                       stream: (&item).node.stream,
+                       is_sugared_doc: false}
+            , span : span}
+}
+
+/// Returns an inner attribute with the given value and span.
+pub fn mk_spanned_attr_inner(span : Span, id: AttrId, item: P<MetaItem>) -> Attribute {
+  mk_spanned_attr(span, id, item, ast::AttrStyle::Inner)
+}
+
+/// Returns an outer attribute with the given value and span.
+pub fn mk_spanned_attr_outer(span : Span, id: AttrId, item: P<MetaItem>) -> Attribute {
+  mk_spanned_attr(span, id, item, ast::AttrStyle::Outer)
+}
+
+/// Returns a new attribute with the appropriate style and span
 pub fn mk_sugared_doc_attr(id: AttrId, text: InternedString, lo: BytePos,
                            hi: BytePos)
                            -> Attribute {

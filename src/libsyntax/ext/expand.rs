@@ -418,11 +418,11 @@ fn contains_macro_use(fld: &mut MacroExpander, attrs: &[ast::Attribute]) -> bool
         };
 
         if is_use {
-            match attr.node.value.node {
-                ast::MetaItemKind::Word(..) => (),
-                _ => fld.cx.span_err(attr.span, "arguments to macro_use are not allowed here"),
-            }
-            return true;
+          if !attr.is_name() { 
+            fld.cx.span_err(attr.span, "arguments to macro_use are not allowed here") 
+          }
+
+          return true;
         }
     }
     false

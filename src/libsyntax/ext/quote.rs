@@ -215,10 +215,19 @@ pub mod rt {
             if self.node.style == ast::AttrStyle::Inner {
                 r.push(TokenTree::Token(self.span, token::Not));
             }
+    
+            let mut inner = Vec::new();
+
+            let mut path_tokens = self.node.path.to_tokens(cx);
+            inner.append(&mut path_tokens);
+
+            let mut rest = tokenstream::ts_to_tts(self.node.stream);
+            inner.append(&mut rest);
+
             r.push(TokenTree::Delimited(self.span, Rc::new(tokenstream::Delimited {
                 delim: token::Bracket,
                 open_span: self.span,
-                tts: self.node.value.to_tokens(cx),
+                tts: inner,
                 close_span: self.span,
             })));
             r

@@ -10,7 +10,7 @@
 
 use ast;
 use attr;
-use codemap::{DUMMY_SP, Span, ExpnInfo, NameAndSpan, MacroAttribute};
+use codemap::{DUMMY_SP, Span, ExpnInfo, NameAndSpan, MacroAttribute, respan};
 use codemap;
 use fold::Folder;
 use fold;
@@ -83,18 +83,18 @@ struct CrateInjector {
 
 impl fold::Folder for CrateInjector {
     fn fold_crate(&mut self, mut krate: ast::Crate) -> ast::Crate {
-        krate.module.items.insert(0, P(ast::Item {
-            id: ast::DUMMY_NODE_ID,
-            ident: self.item_name,
-            attrs: vec!(
-                attr::mk_attr_outer(attr::mk_attr_id(), attr::mk_word_item(
-                        InternedString::new("macro_use")))),
-            node: ast::ItemKind::ExternCrate(Some(self.crate_name)),
-            vis: ast::Visibility::Inherited,
-            span: DUMMY_SP
-        }));
+      // let muse = attr::mk_word_item(InternedString::new("macro_use"));
+      let muse = attr::mk_word_item(token::intern_and_get_ident("macro_use"));
+      krate.module.items.insert(0, P(ast::Item {
+          id: ast::DUMMY_NODE_ID,
+          ident: self.item_name,
+          attrs: vec!(attr::mk_attr_outer(attr::mk_attr_id(), muse)),
+          node: ast::ItemKind::ExternCrate(Some(self.crate_name)),
+          vis: ast::Visibility::Inherited,
+          span: DUMMY_SP
+      }));
 
-        krate
+      krate
     }
 }
 
@@ -146,24 +146,13 @@ impl fold::Folder for PreludeInjector {
         };
 
         let vp = P(codemap::dummy_spanned(ast::ViewPathGlob(prelude_path)));
+        let item = attr::mk_spanned_word_item(self.span, 
+                                              token::intern_and_get_ident("prelude_import"));
         mod_.items.insert(0, P(ast::Item {
             id: ast::DUMMY_NODE_ID,
             ident: keywords::Invalid.ident(),
             node: ast::ItemKind::Use(vp),
-            attrs: vec![ast::Attribute {
-                span: self.span,
-                node: ast::Attribute_ {
-                    id: attr::mk_attr_id(),
-                    style: ast::AttrStyle::Outer,
-                    value: P(ast::MetaItem {
-                        span: self.span,
-                        node: ast::MetaItemKind::Word(
-                            token::intern_and_get_ident("prelude_import")
-                        ),
-                    }),
-                    is_sugared_doc: false,
-                },
-            }],
+            attrs: vec![attr::mk_spanned_attr_outer(self.span, attr::mk_attr_id(), item)],
             vis: ast::Visibility::Inherited,
             span: self.span,
         }));

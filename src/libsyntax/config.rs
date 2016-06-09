@@ -78,12 +78,7 @@ impl<'a> StripUnconfigured<'a> {
         };
 
         if attr::cfg_matches(self.config, &cfg, &mut self.diag) {
-            Some(respan(mi.span, ast::Attribute_ {
-                id: attr::mk_attr_id(),
-                style: attr.node.style,
-                value: mi.clone(),
-                is_sugared_doc: false,
-            }))
+          Some(attr::mk_spanned_attr(mi.span, attr::mk_attr_id(), mi.clone(), attr.node.style))
         } else {
             None
         }
@@ -95,19 +90,20 @@ impl<'a> CfgFolder for StripUnconfigured<'a> {
     // configuration based on the item's attributes
     fn in_cfg(&mut self, attrs: &[ast::Attribute]) -> bool {
         attrs.iter().all(|attr| {
-            let mis = match attr.node.value.node {
-                ast::MetaItemKind::List(_, ref mis) if is_cfg(&attr) => mis,
-                _ => return true
-            };
+            if !attr.check_name("cfg") { return true; }
 
-            if mis.len() != 1 {
-                self.diag.emit_error(|diagnostic| {
-                    diagnostic.span_err(attr.span, "expected 1 cfg-pattern");
-                });
-                return true;
+            if let Some(mis) = attr.meta_item_list() {
+              if mis.len() != 1 {
+                  self.diag.emit_error(|diagnostic| {
+                      diagnostic.span_err(attr.span, "expected 1 cfg-pattern");
+                  });
+                  return true;
+              }
+
+              attr::cfg_matches(self.config, &mis[0], &mut self.diag)
+            } else {
+              true
             }
-
-            attr::cfg_matches(self.config, &mis[0], &mut self.diag)
         })
     }
 

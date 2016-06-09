@@ -744,46 +744,9 @@ pub trait PrintState<'a> {
     }
 
     fn print_attribute_inline(&mut self, attr: &ast::Attribute,
-                              is_inline: bool) -> io::Result<()> {
-        if !is_inline {
-            self.hardbreak_if_not_bol()?;
-        }
-        self.maybe_print_comment(attr.span.lo)?;
-        if attr.node.is_sugared_doc {
-            word(self.writer(), &attr.value_str().unwrap())?;
-            hardbreak(self.writer())
-        } else {
-            match attr.node.style {
-                ast::AttrStyle::Inner => word(self.writer(), "#![")?,
-                ast::AttrStyle::Outer => word(self.writer(), "#[")?,
-            }
-            self.print_meta_item(&attr.meta())?;
-            word(self.writer(), "]")
-        }
-    }
+                              is_inline: bool) -> io::Result<()>;
 
-    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()> {
-        self.ibox(INDENT_UNIT)?;
-        match item.node {
-            ast::MetaItemKind::Word(ref name) => {
-                word(self.writer(), &name)?;
-            }
-            ast::MetaItemKind::NameValue(ref name, ref value) => {
-                self.word_space(&name[..])?;
-                self.word_space("=")?;
-                self.print_literal(value)?;
-            }
-            ast::MetaItemKind::List(ref name, ref items) => {
-                word(self.writer(), &name)?;
-                self.popen()?;
-                self.commasep(Consistent,
-                              &items[..],
-                              |s, i| s.print_meta_item(&i))?;
-                self.pclose()?;
-            }
-        }
-        self.end()
-    }
+    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()>;
 
     fn space_if_not_bol(&mut self) -> io::Result<()> {
         if !self.is_bol() { space(self.writer())?; }
@@ -813,6 +776,36 @@ impl<'a> PrintState<'a> for State<'a> {
     fn literals(&self) -> &Option<Vec<comments::Literal>> {
         &self.literals
     }
+
+    fn print_attribute_inline(&mut self, attr: &ast::Attribute,
+                              is_inline: bool) -> io::Result<()> {
+        if !is_inline {
+            self.hardbreak_if_not_bol()?;
+        }
+        self.maybe_print_comment(attr.span.lo)?;
+        if attr.node.is_sugared_doc {
+            word(self.writer(), &attr.value_str().unwrap())?;
+            hardbreak(self.writer())
+        } else {
+            match attr.node.style {
+                ast::AttrStyle::Inner => word(self.writer(), "#![")?,
+                ast::AttrStyle::Outer => word(self.writer(), "#[")?,
+            }
+            let path_len = attr.node.path.segments.len();
+            self.print_path(&attr.node.path, false, path_len)?;
+            self.print_tokenstream(&attr.node.stream)?;
+            word(self.writer(), "]")
+        }
+    }
+
+    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()> {
+        self.ibox(INDENT_UNIT)?;
+        word(self.writer(), &item.node.name)?;
+        self.print_tokenstream(&item.node.stream)?;
+        self.end()
+    }
+
+
 }
 
 impl<'a> State<'a> {
@@ -1492,6 +1485,10 @@ impl<'a> State<'a> {
             self.print_tt(tt)?;
         }
         self.end()
+    }
+
+    pub fn print_tokenstream(&mut self, ts: &tokenstream::TokenStream) -> io::Result<()> {
+      self.print_tts(&ts.node)
     }
 
     pub fn print_variant(&mut self, v: &ast::Variant) -> io::Result<()> {

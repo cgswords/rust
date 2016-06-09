@@ -240,6 +240,10 @@ pub trait Folder : Sized {
         noop_fold_token(t, self)
     }
 
+    fn fold_tokenstream(&mut self, ts: TokenStream) -> TokenStream {
+        noop_fold_tokenstream(ts, self)
+    }
+
     fn fold_interpolated(&mut self, nt: token::Nonterminal) -> token::Nonterminal {
         noop_fold_interpolated(nt, self)
     }
@@ -504,12 +508,13 @@ pub fn noop_fold_local<T: Folder>(l: P<Local>, fld: &mut T) -> P<Local> {
 }
 
 pub fn noop_fold_attribute<T: Folder>(at: Attribute, fld: &mut T) -> Option<Attribute> {
-    let Spanned {node: Attribute_ {id, style, value, is_sugared_doc}, span} = at;
+    let Spanned {node: Attribute_ {id, style, path, stream, is_sugared_doc}, span} = at;
     Some(Spanned {
         node: Attribute_ {
             id: id,
             style: style,
-            value: fld.fold_meta_item(value),
+            path: path,
+            stream: fld.fold_tokenstream(stream),
             is_sugared_doc: is_sugared_doc
         },
         span: fld.new_span(span)
@@ -528,16 +533,11 @@ pub fn noop_fold_mac<T: Folder>(Spanned {node, span}: Mac, fld: &mut T) -> Mac {
 }
 
 pub fn noop_fold_meta_item<T: Folder>(mi: P<MetaItem>, fld: &mut T) -> P<MetaItem> {
-    mi.map(|Spanned {node, span}| Spanned {
-        node: match node {
-            MetaItemKind::Word(id) => MetaItemKind::Word(id),
-            MetaItemKind::List(id, mis) => {
-                MetaItemKind::List(id, mis.move_map(|e| fld.fold_meta_item(e)))
-            }
-            MetaItemKind::NameValue(id, s) => MetaItemKind::NameValue(id, s)
-        },
-        span: fld.new_span(span)
-    })
+    mi.map(|Spanned {node, span}| 
+             Spanned { node: MetaItemKind { name : node.name 
+                                          , stream : fld.fold_tokenstream(node.stream) }
+                     , span: fld.new_span(span)
+                     })
 }
 
 pub fn noop_fold_arg<T: Folder>(Arg {id, pat, ty}: Arg, fld: &mut T) -> Arg {
@@ -590,6 +590,13 @@ pub fn noop_fold_token<T: Folder>(t: token::Token, fld: &mut T) -> token::Token 
     }
 }
 
+pub fn noop_fold_tokenstream<T: Folder>(ts: TokenStream, fld: &mut T) -> TokenStream {
+    let TokenStream {node, span} = ts;
+    Spanned { node : fld.fold_tts(&node)
+            , span : fld.new_span(span)}
+}
+
+// apply ident folder if it's an ident, apply other folds to interpolated nodes
 /// apply folder to elements of interpolated nodes
 //
 // NB: this can occur only when applying a fold to partially expanded code, where

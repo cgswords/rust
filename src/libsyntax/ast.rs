@@ -694,6 +694,18 @@ impl ReifiedMetaItem {
     }
   }
 
+  pub fn recover_vec_ptr_tokenstream(ls : Vec<P<MetaItem>>) -> TokenStream {
+    if ls.len() == 0 { return tts_to_ts(vec![]) }
+
+    let mut tts = Vec::new();
+    tts.append(&mut (&ls[0]).to_tts());
+    for l in ls.iter().skip(1) {
+      tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+      tts.append(&mut (&l).to_tts());
+    }
+    tts_to_ts(tts)
+  }
+
   pub fn recover_vec_tokenstream(ls : Vec<MetaItem>) -> TokenStream {
     if ls.len() == 0 { return tts_to_ts(vec![]) }
 

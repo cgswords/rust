@@ -11,10 +11,11 @@
 use abi::Abi;
 use ast::{self, Ident, Generics, Expr, BlockCheckMode, UnOp, PatKind};
 use attr;
-use codemap::{Span, respan, Spanned, DUMMY_SP, Pos};
+use codemap::{Span, respan, Spanned, DUMMY_SP, Pos, dummy_spanned};
 use ext::base::ExtCtxt;
 use parse::token::{self, keywords, InternedString};
 use ptr::P;
+use tokenstream::{TokenStream};
 
 // Transitional reexports so qquote can find the paths it is looking for
 mod syntax {
@@ -1121,30 +1122,23 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
     }
 
     fn attribute(&self, sp: Span, mi: P<ast::MetaItem>) -> ast::Attribute {
-        respan(sp, ast::Attribute_ {
-            id: attr::mk_attr_id(),
-            style: ast::AttrStyle::Outer,
-            value: mi,
-            is_sugared_doc: false,
-        })
+      attr::mk_spanned_attr_outer(sp, attr::mk_attr_id(), mi);
     }
 
     fn meta_word(&self, sp: Span, w: InternedString) -> P<ast::MetaItem> {
-        P(respan(sp, ast::MetaItemKind::Word(w)))
+      attr::mk_spanned_word_item(sp, w)
     }
-    fn meta_list(&self,
-                 sp: Span,
-                 name: InternedString,
-                 mis: Vec<P<ast::MetaItem>> )
+
+    fn meta_list(&self, sp: Span, name: InternedString, mis: Vec<P<ast::MetaItem>> )
                  -> P<ast::MetaItem> {
-        P(respan(sp, ast::MetaItemKind::List(name, mis)))
+        attr::mk_spanned_list_item(sp, name, mis)
     }
-    fn meta_name_value(&self,
-                       sp: Span,
-                       name: InternedString,
-                       value: ast::LitKind)
+
+    // The value on the RHS better be a string!
+    fn meta_name_value(&self, sp: Span, name: InternedString, value: ast::LitKind)
                        -> P<ast::MetaItem> {
-        P(respan(sp, ast::MetaItemKind::NameValue(name, respan(sp, value))))
+       let ts = TokenStream::from_ast_lit_str(dummy_spanned(value)); 
+       attr::mk_spanned_item_from_stream(sp, name, ts);
     }
 
     fn item_use(&self, sp: Span,

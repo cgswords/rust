@@ -213,7 +213,7 @@ impl<'a> Parser<'a> {
       Ok(P(spanned(lo, hi, ast::MetaItemKind
                              { name   : name
                              , stream : tokenstream::tts_to_ts(tts)
-                             })));
+                             })))
     }
 
     /// matches meta_seq = ( COMMASEP(meta_item) )
