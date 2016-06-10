@@ -247,7 +247,7 @@ impl<'a, 'gcx, 'tcx> InferCtxt<'a, 'gcx, 'tcx> {
         let mut report = None;
         for item in self.tcx.get_attrs(def_id).iter() {
             if item.check_name("rustc_on_unimplemented") {
-                let err_sp = item.meta().span.substitute_dummy(span);
+                let err_sp = item.span.substitute_dummy(span);
                 let def = self.tcx.lookup_trait_def(trait_ref.def_id);
                 let trait_str = def.trait_ref.to_string();
                 if let Some(ref istring) = item.value_str() {

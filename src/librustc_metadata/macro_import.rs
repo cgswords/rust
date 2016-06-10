@@ -98,8 +98,8 @@ impl<'a, 'v> Visitor<'v> for MacroLoader<'a> {
                     }
                     if let (Some(sel), Some(names)) = (import.as_mut(), names) {
                         for attr in names {
-                            if let ast::MetaItemKind::Word(ref name) = attr.node {
-                                sel.insert(name.clone(), attr.span);
+                            if attr.is_name() {
+                                sel.insert(attr.name().clone(), attr.span);
                             } else {
                                 span_err!(self.sess, attr.span, E0466, "bad macro import");
                             }
@@ -116,8 +116,8 @@ impl<'a, 'v> Visitor<'v> for MacroLoader<'a> {
                     };
 
                     for attr in names {
-                        if let ast::MetaItemKind::Word(ref name) = attr.node {
-                            reexport.insert(name.clone(), attr.span);
+                        if attr.is_name() {
+                            reexport.insert(attr.name().clone(), attr.span);
                         } else {
                             call_bad_macro_reexport(self.sess, attr.span);
                         }

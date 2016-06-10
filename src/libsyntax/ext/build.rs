@@ -1122,7 +1122,7 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
     }
 
     fn attribute(&self, sp: Span, mi: P<ast::MetaItem>) -> ast::Attribute {
-      attr::mk_spanned_attr_outer(sp, attr::mk_attr_id(), mi);
+      attr::mk_spanned_attr_outer(sp, attr::mk_attr_id(), mi)
     }
 
     fn meta_word(&self, sp: Span, w: InternedString) -> P<ast::MetaItem> {
@@ -1138,7 +1138,7 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
     fn meta_name_value(&self, sp: Span, name: InternedString, value: ast::LitKind)
                        -> P<ast::MetaItem> {
        let ts = TokenStream::from_ast_lit_str(dummy_spanned(value)); 
-       attr::mk_spanned_item_from_stream(sp, name, ts);
+       attr::mk_spanned_item_from_stream(sp, name, ts)
     }
 
     fn item_use(&self, sp: Span,

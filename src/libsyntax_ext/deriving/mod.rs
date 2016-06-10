@@ -19,6 +19,7 @@ use syntax::feature_gate;
 use syntax::codemap::{self, Span};
 use syntax::parse::token::{intern, intern_and_get_ident};
 use syntax::ptr::P;
+use syntax::tokenstream::{self, TokenStream};
 
 macro_rules! pathvec {
     ($($x:ident)::+) => (
@@ -76,36 +77,38 @@ pub mod generic;
 
 fn expand_derive(cx: &mut ExtCtxt,
                  span: Span,
-                 mitem: &MetaItem,
+                 mitem: &TokenStream,
                  annotatable: Annotatable)
                  -> Annotatable {
     debug!("expand_derive: span = {:?}", span);
     debug!("expand_derive: mitem = {:?}", mitem);
-    debug!("expand_derive: annotatable input  = {:?}", annotatable);
+    // debug!("expand_derive: annotatable input  = {:?}", annotatable);
     let annot = annotatable.map_item_or(|item| {
         item.map(|mut item| {
-            if mitem.value_str().is_some() {
+            if mitem.maybe_metaitem().and_then(|mi| mi.value_str()).is_some() {
                 cx.span_err(mitem.span, "unexpected value in `derive`");
             }
 
-            let traits = mitem.meta_item_list().unwrap_or(&[]);
+
+            let traits = mitem.maybe_comma_list().unwrap_or(vec![]);
             if traits.is_empty() {
-                cx.span_warn(mitem.span, "empty trait list in `derive`");
+                cx.span_warn(mitem.span, &format!("empty trait list in `derive`; trait was: {:?}", mitem));
             }
 
             let mut found_partial_eq = false;
             let mut eq_span = None;
 
             for titem in traits.iter().rev() {
-                let tname = match titem.node {
-                    MetaItemKind::Word(ref tname) => tname,
-                    _ => {
-                        cx.span_err(titem.span, "malformed `derive` entry");
-                        continue;
-                    }
-                };
+                let titem = titem.maybe_metaitem().unwrap();
+                debug!("expand_derive: item = {:?}",titem);
+                let tname = if titem.is_name() {
+                              titem.maybe_word().unwrap().to_string()
+                            } else {
+                              cx.span_err(titem.span, "malformed `derive` entry");
+                              continue;
+                            };
 
-                if !(is_builtin_trait(tname) || cx.ecfg.enable_custom_derive()) {
+                if !(is_builtin_trait(&tname) || cx.ecfg.enable_custom_derive()) {
                     feature_gate::emit_feature_err(&cx.parse_sess.span_diagnostic,
                                                    "custom_derive",
                                                    titem.span,
@@ -168,7 +171,7 @@ macro_rules! derive_traits {
                     fn expand(&self,
                               ecx: &mut ExtCtxt,
                               sp: Span,
-                              mitem: &MetaItem,
+                              mitem: &TokenStream,
                               annotatable: &Annotatable,
                               push: &mut FnMut(Annotatable)) {
                         if !ecx.parse_sess.codemap().span_allows_unstable(sp)

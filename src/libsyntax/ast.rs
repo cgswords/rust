@@ -19,8 +19,7 @@ use attr::{ThinAttributes, HasAttrs};
 use codemap::{mk_sp, respan, Span, Spanned, DUMMY_SP, ExpnId, dummy_spanned};
 use abi::Abi;
 use errors;
-use ext::quote;
-use parse::token::{self, keywords, InternedString, Token, intern, str_to_ident};
+use parse::token::{self, keywords, InternedString, Token};
 use parse::token::Lit as PLit;
 use print::pprust;
 use ptr::P;
@@ -223,12 +222,10 @@ impl Path {
     }
 
     pub fn get_last_ident(&self) -> Ident {
-      let segs = (*self).segments;
-      if segs.len() < 1 { panic!("Invalid path"); }
-      if let Some(seg) = segs.last() {
-        seg.identifier
-      } else {
-        panic!("No identifier found.")
+      let seg = self.segments.iter().last();
+      match seg {
+        Some(s) => { s.identifier.clone() }
+        None => { panic!("No identifier found.") }
       }
     }
 }
@@ -531,13 +528,12 @@ impl Attribute {
   pub fn to_reified_attr(&self) -> Option<ReifiedAttr> {
     let span   = self.span;
     let id     = self.node.id;
-    let path   = self.node.path;
-    let stream = self.node.stream;
+    let path   = self.node.path.clone();
 
-    if stream.is_empty() {
+    if self.node.stream.is_empty() {
       Some(Spanned { node : ReifiedAttr_::Word(id,path), span : span})
-    } else if stream.is_assignment() {
-      if let Some(rhs) = stream.maybe_assignment() {
+    } else if self.node.stream.is_assignment() {
+      if let Some(rhs) = self.node.stream.maybe_assignment() {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
             PLit::Str_(name) => {
@@ -550,8 +546,8 @@ impl Attribute {
           }
         } else { None }
       } else { None }
-    } else if stream.is_delimited() {
-      if let Some(ls) = stream.maybe_comma_list() {
+    } else if self.node.stream.is_delimited() {
+      if let Some(ls) = self.node.stream.maybe_comma_list() {
         let mut items : Vec<MetaItem> = Vec::new();
         for l in ls {
           if let Some(item) = l.maybe_metaitem() {
@@ -578,19 +574,22 @@ pub enum ReifiedAttr_ {
 
 impl ReifiedAttr {
   pub fn path(&self) -> Path {
-     match self.node { 
-       ReifiedAttr_::Word(_,p) | ReifiedAttr_::Assign(_,p,_) | ReifiedAttr_::List(_,p,_) => p 
+     match (&self).node { 
+       ReifiedAttr_::Word(_,ref p) | 
+       ReifiedAttr_::Assign(_,ref p,_) | 
+       ReifiedAttr_::List(_,ref p,_) => p.clone() 
      }
   }
   
   pub fn recover_tokenstream(&self) -> TokenStream {
-    match self.node {
+    match (&self).node {
       ReifiedAttr_::Word(_,_) => tts_to_ts(vec![]),
-      ReifiedAttr_::Assign(_,_,l) => TokenStream::from_ast_lit_str(l),
-      ReifiedAttr_::List(_,_,ls) => {
+      ReifiedAttr_::Assign(_,_,ref l) => TokenStream::from_ast_lit_str(l.clone()),
+      ReifiedAttr_::List(_,_,ref ls) => {
         if ls.len() == 0 { return tts_to_ts(vec![]) }
 
         let mut tts = Vec::new();
+        let mut ls = ls.clone();
         tts.append(&mut ls[0].to_tts());
         for l in ls.iter().skip(1) {
           tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
@@ -617,13 +616,12 @@ pub struct MetaItemKind {
 impl MetaItem {
   pub fn to_reified_metaitem(&self) -> Option<ReifiedMetaItem> {
     let span = self.span;
-    let name = self.node.name;
-    let stream = self.node.stream;
+    let name = self.node.name.clone();
 
-    if stream.is_empty() {
+    if self.node.stream.is_empty() {
       Some(Spanned { node : ReifiedMetaItem_::Word(name), span : span})
-    } else if stream.is_assignment() {
-      if let Some(rhs) = stream.maybe_assignment() {
+    } else if self.node.stream.is_assignment() {
+      if let Some(rhs) = self.node.stream.maybe_assignment() {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
             PLit::Str_(arg) => {
@@ -634,8 +632,8 @@ impl MetaItem {
           }
         } else { None }
       } else { None }
-    } else if stream.is_delimited() {
-      if let Some(ls) = stream.maybe_comma_list() {
+    } else if self.node.stream.is_delimited() {
+      if let Some(ls) = self.node.stream.maybe_comma_list() {
         let mut items : Vec<MetaItem> = Vec::new();
         for l in ls {
           if let Some(item) = l.maybe_metaitem() {
@@ -650,14 +648,14 @@ impl MetaItem {
   }
 
   pub fn to_tts(&self) -> Vec<TokenTree> {
-    let mut tts = ts_to_tts(TokenStream::from_interned_string_as_ident(self.node.name));
+    let mut tts = ts_to_tts(TokenStream::from_interned_string_as_ident(self.node.name.clone()));
     let mut stream_tokens = self.node.stream.to_trees();
     tts.append(&mut stream_tokens);
     tts
   }
 }
 
-pub fn reify_metaitem_list(items : &[P<MetaItem>]) -> Option<Vec<ReifiedMetaItem>> {
+pub fn reify_metaitem_list(items : Vec<P<MetaItem>>) -> Option<Vec<ReifiedMetaItem>> {
   let mut res = Vec::new();
   for m in items {
     let rmi = m.to_reified_metaitem();
@@ -681,16 +679,18 @@ pub enum ReifiedMetaItem_ {
 
 impl ReifiedMetaItem {
   pub fn name(&self) -> InternedString {
-     match self.node { 
-       ReifiedMetaItem_::Word(n) | ReifiedMetaItem_::Assign(n, _) | ReifiedMetaItem_::List(n, _) => n
+     match (&self).node { 
+       ReifiedMetaItem_::Word(ref n) | 
+       ReifiedMetaItem_::Assign(ref n, _) | 
+       ReifiedMetaItem_::List(ref n, _) => n.clone()
      }
   }
   
   pub fn recover_tokenstream(&self) -> TokenStream {
-    match self.node {
+    match (&self).node {
       ReifiedMetaItem_::Word(_) => tts_to_ts(vec![]),
-      ReifiedMetaItem_::Assign(_, l) => TokenStream::from_ast_lit_str(l),
-      ReifiedMetaItem_::List(_, ls) => ReifiedMetaItem::recover_vec_tokenstream(ls)
+      ReifiedMetaItem_::Assign(_, ref l) => TokenStream::from_ast_lit_str(l.clone()),
+      ReifiedMetaItem_::List(_, ref ls) => ReifiedMetaItem::recover_vec_tokenstream(ls.clone())
     }
   }
 
@@ -706,7 +706,7 @@ impl ReifiedMetaItem {
     tts_to_ts(tts)
   }
 
-  pub fn recover_vec_tokenstream(ls : Vec<MetaItem>) -> TokenStream {
+  pub fn recover_vec_tokenstream(mut ls : Vec<MetaItem>) -> TokenStream {
     if ls.len() == 0 { return tts_to_ts(vec![]) }
 
     let mut tts = Vec::new();

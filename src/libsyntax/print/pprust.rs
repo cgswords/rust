@@ -744,9 +744,97 @@ pub trait PrintState<'a> {
     }
 
     fn print_attribute_inline(&mut self, attr: &ast::Attribute,
-                              is_inline: bool) -> io::Result<()>;
+                              is_inline: bool) -> io::Result<()> {
+        if !is_inline {
+            self.hardbreak_if_not_bol()?;
+        }
+        self.maybe_print_comment(attr.span.lo)?;
+        if attr.node.is_sugared_doc {
+            word(self.writer(), &attr.value_str().unwrap())?;
+            hardbreak(self.writer())
+        } else {
+            match attr.node.style {
+                ast::AttrStyle::Inner => word(self.writer(), "#![")?,
+                ast::AttrStyle::Outer => word(self.writer(), "#[")?,
+            }
+            word(self.writer(), &attr.node.path.segments[0].identifier.name.as_str()[..])?;
+            for p in attr.node.path.segments.iter().skip(1) {
+               word(self.writer(), &p.identifier.name.as_str()[..])?;
+               word(self.writer(), &token_to_string(&Token::ModSep))?;
+              
+            }
+            self.print_tokenstream(&attr.node.stream)?;
+            word(self.writer(), "]")
+        }
+    }
 
-    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()>;
+    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()> {
+        self.ibox(INDENT_UNIT)?;
+        word(self.writer(), &item.node.name)?;
+        self.print_tokenstream(&item.node.stream)?;
+        self.end()
+    }
+
+    /// This doesn't deserve to be called "pretty" printing, but it should be
+    /// meaning-preserving. A quick hack that might help would be to look at the
+    /// spans embedded in the TTs to decide where to put spaces and newlines.
+    /// But it'd be better to parse these according to the grammar of the
+    /// appropriate macro, transcribe back into the grammar we just parsed from,
+    /// and then pretty-print the resulting AST nodes (so, e.g., we print
+    /// expression arguments as expressions). It can be done! I think.
+    fn print_tt(&mut self, tt: &tokenstream::TokenTree) -> io::Result<()> {
+        match *tt {
+            TokenTree::Token(_, ref tk) => {
+                word(self.writer(), &token_to_string(tk))?;
+                match *tk {
+                    parse::token::DocComment(..) => {
+                        hardbreak(self.writer())
+                    }
+                    _ => Ok(())
+                }
+            }
+            TokenTree::Delimited(_, ref delimed) => {
+                word(self.writer(), &token_to_string(&delimed.open_token()))?;
+                space(self.writer())?;
+                self.print_tts(&delimed.tts)?;
+                space(self.writer())?;
+                word(self.writer(), &token_to_string(&delimed.close_token()))
+            },
+            TokenTree::Sequence(_, ref seq) => {
+                word(self.writer(), "$(")?;
+                for tt_elt in &seq.tts {
+                    self.print_tt(tt_elt)?;
+                }
+                word(self.writer(), ")")?;
+                match seq.separator {
+                    Some(ref tk) => {
+                        word(self.writer(), &token_to_string(tk))?;
+                    }
+                    None => {},
+                }
+                match seq.op {
+                    tokenstream::KleeneOp::ZeroOrMore => word(self.writer(), "*"),
+                    tokenstream::KleeneOp::OneOrMore => word(self.writer(), "+"),
+                }
+            }
+        }
+    }
+
+    fn print_tts(&mut self, tts: &[tokenstream::TokenTree]) -> io::Result<()> {
+        self.ibox(0)?;
+        for (i, tt) in tts.iter().enumerate() {
+            if i != 0 {
+                space(self.writer())?;
+            }
+            self.print_tt(tt)?;
+        }
+        self.end()
+    }
+
+    fn print_tokenstream(&mut self, ts: &tokenstream::TokenStream) -> io::Result<()> {
+      self.print_tts(&ts.node)
+    }
+
 
     fn space_if_not_bol(&mut self) -> io::Result<()> {
         if !self.is_bol() { space(self.writer())?; }
@@ -776,35 +864,6 @@ impl<'a> PrintState<'a> for State<'a> {
     fn literals(&self) -> &Option<Vec<comments::Literal>> {
         &self.literals
     }
-
-    fn print_attribute_inline(&mut self, attr: &ast::Attribute,
-                              is_inline: bool) -> io::Result<()> {
-        if !is_inline {
-            self.hardbreak_if_not_bol()?;
-        }
-        self.maybe_print_comment(attr.span.lo)?;
-        if attr.node.is_sugared_doc {
-            word(self.writer(), &attr.value_str().unwrap())?;
-            hardbreak(self.writer())
-        } else {
-            match attr.node.style {
-                ast::AttrStyle::Inner => word(self.writer(), "#![")?,
-                ast::AttrStyle::Outer => word(self.writer(), "#[")?,
-            }
-            let path_len = attr.node.path.segments.len();
-            self.print_path(&attr.node.path, false, path_len)?;
-            self.print_tokenstream(&attr.node.stream)?;
-            word(self.writer(), "]")
-        }
-    }
-
-    fn print_meta_item(&mut self, item: &ast::MetaItem) -> io::Result<()> {
-        self.ibox(INDENT_UNIT)?;
-        word(self.writer(), &item.node.name)?;
-        self.print_tokenstream(&item.node.stream)?;
-        self.end()
-    }
-
 
 }
 
@@ -1429,66 +1488,6 @@ impl<'a> State<'a> {
 
             self.bclose(span)
         }
-    }
-
-    /// This doesn't deserve to be called "pretty" printing, but it should be
-    /// meaning-preserving. A quick hack that might help would be to look at the
-    /// spans embedded in the TTs to decide where to put spaces and newlines.
-    /// But it'd be better to parse these according to the grammar of the
-    /// appropriate macro, transcribe back into the grammar we just parsed from,
-    /// and then pretty-print the resulting AST nodes (so, e.g., we print
-    /// expression arguments as expressions). It can be done! I think.
-    pub fn print_tt(&mut self, tt: &tokenstream::TokenTree) -> io::Result<()> {
-        match *tt {
-            TokenTree::Token(_, ref tk) => {
-                word(&mut self.s, &token_to_string(tk))?;
-                match *tk {
-                    parse::token::DocComment(..) => {
-                        hardbreak(&mut self.s)
-                    }
-                    _ => Ok(())
-                }
-            }
-            TokenTree::Delimited(_, ref delimed) => {
-                word(&mut self.s, &token_to_string(&delimed.open_token()))?;
-                space(&mut self.s)?;
-                self.print_tts(&delimed.tts)?;
-                space(&mut self.s)?;
-                word(&mut self.s, &token_to_string(&delimed.close_token()))
-            },
-            TokenTree::Sequence(_, ref seq) => {
-                word(&mut self.s, "$(")?;
-                for tt_elt in &seq.tts {
-                    self.print_tt(tt_elt)?;
-                }
-                word(&mut self.s, ")")?;
-                match seq.separator {
-                    Some(ref tk) => {
-                        word(&mut self.s, &token_to_string(tk))?;
-                    }
-                    None => {},
-                }
-                match seq.op {
-                    tokenstream::KleeneOp::ZeroOrMore => word(&mut self.s, "*"),
-                    tokenstream::KleeneOp::OneOrMore => word(&mut self.s, "+"),
-                }
-            }
-        }
-    }
-
-    pub fn print_tts(&mut self, tts: &[tokenstream::TokenTree]) -> io::Result<()> {
-        self.ibox(0)?;
-        for (i, tt) in tts.iter().enumerate() {
-            if i != 0 {
-                space(&mut self.s)?;
-            }
-            self.print_tt(tt)?;
-        }
-        self.end()
-    }
-
-    pub fn print_tokenstream(&mut self, ts: &tokenstream::TokenStream) -> io::Result<()> {
-      self.print_tts(&ts.node)
     }
 
     pub fn print_variant(&mut self, v: &ast::Variant) -> io::Result<()> {

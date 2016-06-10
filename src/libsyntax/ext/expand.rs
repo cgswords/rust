@@ -845,7 +845,7 @@ fn expand_decorators(a: Annotatable,
                     let mut items: SmallVector<Annotatable> = SmallVector::zero();
                     dec.expand(fld.cx,
                                attr.span,
-                               &attr.node.value,
+                               &attr.node.stream,
                                &a,
                                &mut |ann| items.push(ann));
                     decorator_items.extend(items.into_iter()
@@ -889,7 +889,7 @@ fn expand_item_multi_modifier(mut it: Annotatable,
                             allow_internal_unstable: true,
                         }
                     });
-                    it = mac.expand(fld.cx, attr.span, &attr.node.value, it);
+                    it = mac.expand(fld.cx, attr.span, &attr.node.stream, it);
                     fld.cx.bt_pop();
                 }
                 _ => unreachable!()

@@ -18,13 +18,14 @@ use syntax::ext::base::{ExtCtxt, Annotatable};
 use syntax::ext::build::AstBuilder;
 use syntax::parse::token::InternedString;
 use syntax::ptr::P;
+use syntax::tokenstream::{TokenStream};
 
 #[derive(PartialEq)]
 enum Mode { Deep, Shallow }
 
 pub fn expand_deriving_clone(cx: &mut ExtCtxt,
                              span: Span,
-                             mitem: &MetaItem,
+                             mitem: &TokenStream,
                              item: &Annotatable,
                              push: &mut FnMut(Annotatable))
 {

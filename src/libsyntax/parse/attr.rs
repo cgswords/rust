@@ -9,14 +9,14 @@
 // except according to those terms.
 
 use attr;
-use ast::{self, MetaItemKind};
+use ast::{self, Path};
 use codemap::{spanned, Spanned, mk_sp, Span};
 use parse::common::SeqSep;
 use parse::PResult;
-use parse::token;
+use parse::token::{self, str_to_ident};
 use parse::parser::{Parser, TokenType, PathStyle};
 use ptr::P;
-use tokenstream::{self, TokenTree, TokenStream};
+use tokenstream::{self, TokenTree};
 
 impl<'a> Parser<'a> {
     /// Parse attributes that appear before an item
@@ -60,10 +60,12 @@ impl<'a> Parser<'a> {
                self.token);
         let (span, path, stream, mut style) = match self.token {
             token::Pound => {
+                debug!("parse_attributes: self.token={:?}", self.token);
                 let lo = self.span.lo;
                 self.bump();
 
                 if permit_inner {
+                    debug!("parse_attributes: self.token={:?}", self.token);
                     self.expected_tokens.push(TokenType::Token(token::Not));
                 }
                 let style = if self.token == token::Not {
@@ -82,14 +84,40 @@ impl<'a> Parser<'a> {
                     ast::AttrStyle::Outer
                 };
 
+                debug!("parse_attributes: self.token={:?}", self.token);
                 self.expect(&token::OpenDelim(token::Bracket))?;
-                let meta_lo = self.span.lo;
+
+                debug!("parse_attributes: self.token={:?}", self.token);
+                let nt_meta = match self.token {
+                    token::Interpolated(token::NtMeta(ref e)) => Some(e.clone()),
+                    _ => None,
+                };
+
+                match nt_meta {
+                    Some(meta) => {
+                        self.bump(); // bump the metaitem
+                        self.expect(&token::CloseDelim(token::Bracket))?;
+                        debug!("Found metaitem, handing that back");
+                        return Ok(Spanned { 
+                                   span : meta.span,
+                                   node : ast::Attribute_ {
+                                     id : attr::mk_attr_id(),
+                                     style: style,
+                                     path: Path::from_ident(meta.span, str_to_ident(&meta.node.name[..])),
+                                     stream: meta.node.stream.clone(),
+                                     is_sugared_doc: false
+                                    }});
+                    }
+                    None => {}
+                }
+ 
+                debug!("parse_attributes: self.token={:?}", self.token);
                 let path = self.parse_path(PathStyle::Mod)?;
+                debug!("parse_attributes: self.token={:?}", self.token);
                 let mut tts : Vec<TokenTree> = Vec::new();
                 loop {
                   match self.token {
                     token::CloseDelim(token::Bracket) => { 
-                      self.bump();
                       break }
                     _ => {
                       let tt = self.parse_token_tree()?;
@@ -97,7 +125,7 @@ impl<'a> Parser<'a> {
                     }
                   }
                 }
-                let meta_hi = self.span.hi;
+                debug!("parse_attributes: self.token={:?}", self.token);
                 self.expect(&token::CloseDelim(token::Bracket))?;
                 let hi = self.span.hi;
 

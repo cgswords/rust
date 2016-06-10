@@ -25,6 +25,7 @@ use config::CfgDiag;
 use errors::Handler;
 use feature_gate::{GatedCfg, GatedCfgAttr};
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
+// use parse::lexer::comments::{doc_comment_style};
 use parse::token::InternedString;
 use parse::token::{str_to_ident};
 use parse::token;
@@ -91,7 +92,7 @@ pub fn is_reified_used(attr: &ReifiedAttr) -> bool {
     })
 }
 
-// MetaMethods for inspecting reified attributes and reified metaitems.
+// MetaMethods for inspecting unreified attributes and unreified metaitems.
 pub trait AttrMetaMethods {
     fn check_name(&self, name: &str) -> bool {
         name == &self.name()[..]
@@ -105,7 +106,9 @@ pub trait AttrMetaMethods {
     /// containing a string, otherwise None.
     fn value_str(&self) -> Option<InternedString>;
     /// Gets a list of inner meta items from a list MetaItem type.
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]>;
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>>;
+    // No longer handing out a borrow, because it doesn't exist before
+    // you call this.
 
     fn is_name(&self)   -> bool;
     fn is_assign(&self) -> bool;
@@ -138,9 +141,9 @@ impl AttrMetaMethods for Attribute {
       }
     }
 
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+    fn meta_item_list<'a>(&self) -> Option<Vec<P<MetaItem>>> {
       if let Some(ra) = self.to_reified_attr() {
-        ra.meta_item_list()
+        (&ra.meta_item_list()).clone()
       } else {
         None
       }
@@ -194,8 +197,9 @@ impl AttrMetaMethods for ReifiedAttr {
 
     fn name(&self) -> InternedString { 
       match self.node {
-        ReifiedAttr_::Word(_,p) | ReifiedAttr_::Assign(_,p,_) | ReifiedAttr_::List(_,p,_) 
-          => p.get_last_ident().name.as_str()
+        ReifiedAttr_::Word(_,ref p) | 
+        ReifiedAttr_::Assign(_,ref p,_) | 
+        ReifiedAttr_::List(_,ref p,_) => p.get_last_ident().name.as_str()
       }
     }
 
@@ -211,11 +215,10 @@ impl AttrMetaMethods for ReifiedAttr {
       }
     }
 
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
       match self.node {
-      ReifiedAttr_::List(_,_, mi) => {
-        let mis = mi.iter().map(|&x| P(x)).collect::<Vec<P<MetaItem>>>();
-        Some(&mis[..])
+      ReifiedAttr_::List(_,_, ref mi) => {
+        Some(mi.clone().into_iter().map(|x| P(x)).collect::<Vec<P<MetaItem>>>())
       }
       _ => None 
       }
@@ -244,7 +247,7 @@ impl AttrMetaMethods for ReifiedAttr {
  
     fn maybe_word(&self) -> Option<InternedString> {
       match self.node {
-        ReifiedAttr_::Word(_,ref n) => Some(self.name()),
+        ReifiedAttr_::Word(_,_) => Some(self.name()),
         _ => None
       }
     }
@@ -268,7 +271,7 @@ impl AttrMetaMethods for MetaItem {
     }
 
     fn name(&self) -> InternedString {
-      self.node.name
+      self.node.name.clone()
     }
 
     fn value_str(&self) -> Option<InternedString> {
@@ -279,7 +282,7 @@ impl AttrMetaMethods for MetaItem {
       }
     }
 
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
       if let Some(ra) = self.to_reified_metaitem() {
         ra.meta_item_list()
       } else {
@@ -345,11 +348,10 @@ impl AttrMetaMethods for ReifiedMetaItem {
       }
     }
 
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
-      match self.node {
-        ReifiedMetaItem_::List(_, mi) => {
-          let mis = mi.iter().map(|&x| P(x)).collect::<Vec<P<MetaItem>>>();
-          Some(&mis[..])
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
+      match (&self).node {
+        ReifiedMetaItem_::List(_, ref mi) => {
+          Some(mi.clone().into_iter().map(|x| P(x)).collect::<Vec<P<MetaItem>>>())
         }
         _ => None
       }
@@ -399,7 +401,7 @@ impl AttrMetaMethods for ReifiedMetaItem {
 impl AttrMetaMethods for P<ReifiedMetaItem> {
     fn name(&self) -> InternedString { (**self).name() }
     fn value_str(&self) -> Option<InternedString> { (**self).value_str() }
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
         (**self).meta_item_list()
     }
     fn is_name(&self)   -> bool { (**self).is_name() }
@@ -416,7 +418,7 @@ impl AttrMetaMethods for P<ReifiedMetaItem> {
 impl AttrMetaMethods for P<MetaItem> {
     fn name(&self) -> InternedString { (**self).name() }
     fn value_str(&self) -> Option<InternedString> { (**self).value_str() }
-    fn meta_item_list(&self) -> Option<&[P<MetaItem>]> {
+    fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
         (**self).meta_item_list()
     }
     fn is_name(&self)   -> bool { (**self).is_name() }
@@ -432,10 +434,6 @@ impl AttrMetaMethods for P<MetaItem> {
 
 
 
-//-----------------------------------------------------------------------------------
-//-----------------------------------------------------------------------------------
-// TODO: FIX ALL OF THIS
-/*
 pub trait AttributeMethods {
 fn with_desugared_doc<T, F>(&self, f: F) -> T where
         F: FnOnce(&Attribute) -> T;
@@ -452,8 +450,7 @@ impl AttributeMethods for Attribute {
             let comment = self.value_str().unwrap();
             let meta = mk_name_value_item_str(
                 InternedString::new("doc"),
-                token::intern_and_get_ident(&strip_doc_comment_decoration(
-                        &comment)));
+                token::intern_and_get_ident(&strip_doc_comment_decoration(&comment)));
             if self.node.style == ast::AttrStyle::Outer {
                 f(&mk_attr_outer(self.node.id, meta))
             } else {
@@ -464,9 +461,8 @@ impl AttributeMethods for Attribute {
         }
     }
 }
-*/
-/* Constructors */
 
+/* Constructors */
 pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
                               -> P<MetaItem> {
   let value_lit = dummy_spanned(ast::LitKind::Str(value, ast::StrStyle::Cooked));
@@ -542,13 +538,20 @@ pub fn mk_attr_outer(id: AttrId, item: P<MetaItem>) -> Attribute {
   mk_attr(id, item, ast::AttrStyle::Outer)
 }
 
+/// Returns an outer attribute with the given value and maybe doc.
+pub fn mk_doc_attr_outer(id: AttrId, item: P<MetaItem>, doc: bool) -> Attribute {
+  let mut attr = mk_attr(id, item, ast::AttrStyle::Outer);
+  attr.node.is_sugared_doc = doc;
+  attr
+}
+
 /// Returns a new attribute with the appropriate style
 pub fn mk_attr(id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) -> Attribute {
     dummy_spanned(Attribute_ {
         id: id,
         style: style,
         path : ast::Path::from_ident((&item).span, str_to_ident(&(*item).name()[..])),  
-        stream: (&item).node.stream,
+        stream: item.node.stream.clone(),
         is_sugared_doc: false,
     })
 }
@@ -560,7 +563,7 @@ pub fn mk_spanned_attr(span : Span, id: AttrId, item: P<MetaItem>, style : ast::
                        id: id,
                        style: style,
                        path : ast::Path::from_ident((&item).span, str_to_ident(&(*item).name()[..])),  
-                       stream: (&item).node.stream,
+                       stream: item.node.stream.clone(),
                        is_sugared_doc: false}
             , span : span}
 }
@@ -647,7 +650,7 @@ fn to_assign_map(diagnostic: &Handler, expected_names : &[&str], metas : &[Reifi
 /// span included in the `==` comparison a plain MetaItem.
 pub fn contains(haystack: &[P<MetaItem>], needle: &MetaItem) -> bool {
     debug!("attr::contains (name={})", needle.name());
-    haystack.iter().any(|&item| {
+    haystack.iter().any(|ref item| {
         debug!("  testing: {}", item.name());
         item.node == needle.node
     })

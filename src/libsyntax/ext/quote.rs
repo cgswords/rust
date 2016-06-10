@@ -221,7 +221,7 @@ pub mod rt {
             let mut path_tokens = self.node.path.to_tokens(cx);
             inner.append(&mut path_tokens);
 
-            let mut rest = tokenstream::ts_to_tts(self.node.stream);
+            let mut rest = tokenstream::ts_to_tts(self.node.stream.clone());
             inner.append(&mut rest);
 
             r.push(TokenTree::Delimited(self.span, Rc::new(tokenstream::Delimited {

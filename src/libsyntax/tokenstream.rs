@@ -15,7 +15,7 @@ use ext::tt::macro_parser;
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
 use parse::lexer;
 use parse;
-use parse::token::{self, Token, Lit, intern_and_get_ident, str_to_ident, InternedString};
+use parse::token::{self, Token, Lit, intern_and_get_ident, InternedString};
 use parse::token::Lit as PLit;
 use std::rc::Rc;
 

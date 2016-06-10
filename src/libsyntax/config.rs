@@ -13,7 +13,7 @@ use errors::Handler;
 use feature_gate::GatedCfgAttr;
 use fold::Folder;
 use {ast, fold, attr};
-use codemap::{Spanned, respan};
+use codemap::{Spanned};
 use ptr::P;
 
 use util::small_vector::SmallVector;

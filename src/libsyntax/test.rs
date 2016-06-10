@@ -417,8 +417,8 @@ fn should_panic(i: &ast::Item) -> ShouldPanic {
     match i.attrs.iter().find(|attr| attr.check_name("should_panic")) {
         Some(attr) => {
             let msg = attr.meta_item_list()
-                .and_then(|list| list.iter().find(|mi| mi.check_name("expected")))
-                .and_then(|mi| mi.value_str());
+                          .and_then(|list| list.into_iter().find(|mi| mi.check_name("expected")))
+                          .and_then(|mi| mi.value_str());
             ShouldPanic::Yes(msg)
         }
         None => ShouldPanic::No,

@@ -915,7 +915,7 @@ impl<'a, 'v> Visitor<'v> for PostExpansionVisitor<'a> {
                 }
                 for attr in &i.attrs {
                     if attr.name() == "repr" {
-                        for item in attr.meta_item_list().unwrap_or(&[]) {
+                        for item in attr.meta_item_list().unwrap_or(vec![]) {
                             if item.name() == "simd" {
                                 gate_feature_post!(&self, repr_simd, i.span,
                                                    "SIMD types are experimental \

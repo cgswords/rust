@@ -110,14 +110,16 @@ impl<'a, 'tcx> IfThisChanged<'a, 'tcx> {
             if attr.check_name(IF_THIS_CHANGED) {
                 let mut id = None;
                 for meta_item in attr.meta_item_list().unwrap_or_default() {
-                    match meta_item.node {
-                        ast::MetaItemKind::Word(ref s) if id.is_none() => id = Some(s.clone()),
-                        _ => {
-                            self.tcx.sess.span_err(
-                                meta_item.span,
-                                &format!("unexpected meta-item {:?}", meta_item.node));
-                        }
-                    }
+                  if !id.is_none() || !meta_item.is_name() { 
+                   self.tcx.sess.span_err(meta_item.span,
+                                          &format!("unexpected meta-item {:?}", meta_item.node));
+                  }
+                  if let Some(s) = meta_item.maybe_word() {
+                    id = Some(s.clone());
+                  } else {
+                   self.tcx.sess.span_err(meta_item.span,
+                                          &format!("unexpected meta-item {:?}", meta_item.node));
+                  }
                 }
                 let id = id.unwrap_or(InternedString::new(ID));
                 self.if_this_changed.entry(id)
@@ -127,17 +129,19 @@ impl<'a, 'tcx> IfThisChanged<'a, 'tcx> {
                 let mut dep_node_interned = None;
                 let mut id = None;
                 for meta_item in attr.meta_item_list().unwrap_or_default() {
-                    match meta_item.node {
-                        ast::MetaItemKind::Word(ref s) if dep_node_interned.is_none() =>
-                            dep_node_interned = Some(s.clone()),
-                        ast::MetaItemKind::Word(ref s) if id.is_none() =>
-                            id = Some(s.clone()),
-                        _ => {
-                            self.tcx.sess.span_err(
-                                meta_item.span,
-                                &format!("unexpected meta-item {:?}", meta_item.node));
-                        }
+                  if let Some(s) = meta_item.maybe_word() {
+                    if dep_node_interned.is_none() {
+                      dep_node_interned = Some(s.clone());
+                    } else if id.is_none() {
+                      id = Some(s.clone());
+                    } else {
+                      self.tcx.sess.span_err(meta_item.span,
+                                             &format!("unexpected meta-item {:?}", meta_item.node));
                     }
+                  } else {
+                    self.tcx.sess.span_err(meta_item.span,
+                                           &format!("unexpected meta-item {:?}", meta_item.node));
+                  }
                 }
                 let dep_node = match dep_node_interned {
                     Some(ref n) => {

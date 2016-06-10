@@ -203,6 +203,7 @@ use syntax::errors::Handler;
 use syntax::util::move_map::MoveMap;
 use syntax::parse::token::{keywords, InternedString};
 use syntax::ptr::P;
+use syntax::tokenstream::TokenStream;
 
 use self::ty::{LifetimeBounds, Path, Ptr, PtrTy, Self_, Ty};
 
@@ -386,7 +387,7 @@ fn find_type_parameters(ty: &ast::Ty, ty_param_names: &[ast::Name]) -> Vec<P<ast
 impl<'a> TraitDef<'a> {
     pub fn expand(&self,
                   cx: &mut ExtCtxt,
-                  mitem: &ast::MetaItem,
+                  mitem: &TokenStream,
                   item: &'a Annotatable,
                   push: &mut FnMut(Annotatable))
     {

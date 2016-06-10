@@ -308,10 +308,15 @@ impl MissingDoc {
         }
 
         let has_doc = attrs.iter().any(|a| {
-            match a.node.value.node {
-                ast::MetaItemKind::NameValue(ref name, _) if *name == "doc" => true,
-                _ => false
-            }
+           if let Some((name, _)) = a.maybe_assign() {
+             if name == "doc"{ 
+               true
+             } else {
+               false 
+             }
+           } else {
+             false
+           }
         });
         if !has_doc {
             cx.span_lint(MISSING_DOCS, sp,
@@ -1103,12 +1108,19 @@ impl LintPass for UnstableFeatures {
 
 impl LateLintPass for UnstableFeatures {
     fn check_attribute(&mut self, ctx: &LateContext, attr: &ast::Attribute) {
-        if attr::contains_name(&[attr.node.value.clone()], "feature") {
-            if let Some(items) = attr.node.value.meta_item_list() {
-                for item in items {
-                    ctx.span_lint(UNSTABLE_FEATURES, item.span, "unstable feature");
-                }
+        // if attr::contains_name(&[attr.node.value.clone()], "feature") {
+        //     if let Some(items) = attr.node.value.meta_item_list() {
+        //         for item in items {
+        //             ctx.span_lint(UNSTABLE_FEATURES, item.span, "unstable feature");
+        //         }
+        //     }
+        // }
+        if attr.check_name("feature") {
+          if let Some(items) = attr.meta_item_list() {
+            for item in items {
+               ctx.span_lint(UNSTABLE_FEATURES, item.span, "unstable feature");  
             }
+          }
         }
     }
 }

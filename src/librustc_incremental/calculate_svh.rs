@@ -69,7 +69,7 @@ impl<'a, 'tcx> SvhCalculate for TyCtxt<'a, 'tcx, 'tcx> {
         // to avoid hashing the AttrId
         for attr in &krate.attrs {
             debug!("krate attr {:?}", attr);
-            attr.node.value.hash(&mut state);
+            attr.node.path.hash(&mut state);
         }
 
         Svh::new(state.finish())

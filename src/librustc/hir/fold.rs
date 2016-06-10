@@ -18,8 +18,10 @@ use syntax::attr::ThinAttributesExt;
 use hir;
 use syntax::codemap::{respan, Span, Spanned};
 use syntax::ptr::P;
-use syntax::parse::token::keywords;
+use syntax::parse::token::{self, keywords};
 use syntax::util::move_map::MoveMap;
+use syntax::tokenstream::{self, TokenTree, TokenStream};
+use std::rc::Rc;
 
 pub trait Folder : Sized {
     // Any additions to this trait should happen in form
@@ -234,6 +236,22 @@ pub trait Folder : Sized {
 
     fn fold_where_predicate(&mut self, where_predicate: WherePredicate) -> WherePredicate {
         noop_fold_where_predicate(where_predicate, self)
+    }
+
+    fn fold_tt(&mut self, tt: &TokenTree) -> TokenTree {
+        noop_fold_tt(tt, self)
+    }
+
+    fn fold_tts(&mut self, tts: &[TokenTree]) -> Vec<TokenTree> {
+        noop_fold_tts(tts, self)
+    }
+
+    fn fold_token(&mut self, t: token::Token) -> token::Token {
+        noop_fold_token(t, self)
+    }
+
+    fn fold_tokenstream(&mut self, ts: TokenStream) -> TokenStream {
+        noop_fold_tokenstream(ts, self)
     }
 
     /// called for the `id` on each declaration
@@ -467,12 +485,13 @@ pub fn noop_fold_local<T: Folder>(l: P<Local>, fld: &mut T) -> P<Local> {
 }
 
 pub fn noop_fold_attribute<T: Folder>(at: Attribute, fld: &mut T) -> Option<Attribute> {
-    let Spanned {node: Attribute_ {id, style, value, is_sugared_doc}, span} = at;
+    let Spanned {node: Attribute_ {id, style, path, stream, is_sugared_doc}, span} = at;
     Some(Spanned {
         node: Attribute_ {
             id: id,
             style: style,
-            value: fld.fold_meta_item(value),
+            path: path,
+            stream: fld.fold_tokenstream(stream),
             is_sugared_doc: is_sugared_doc,
         },
         span: fld.new_span(span),
@@ -480,18 +499,52 @@ pub fn noop_fold_attribute<T: Folder>(at: Attribute, fld: &mut T) -> Option<Attr
 }
 
 pub fn noop_fold_meta_item<T: Folder>(mi: P<MetaItem>, fld: &mut T) -> P<MetaItem> {
-    mi.map(|Spanned { node, span }| {
-        Spanned {
-            node: match node {
-                MetaItemKind::Word(id) => MetaItemKind::Word(id),
-                MetaItemKind::List(id, mis) => {
-                    MetaItemKind::List(id, mis.move_map(|e| fld.fold_meta_item(e)))
-                }
-                MetaItemKind::NameValue(id, s) => MetaItemKind::NameValue(id, s),
-            },
-            span: fld.new_span(span),
-        }
-    })
+    mi.map(|Spanned {node, span}| 
+             Spanned { node: MetaItemKind { name : node.name 
+                                          , stream : fld.fold_tokenstream(node.stream) }
+                     , span: fld.new_span(span)
+                     })
+}
+
+pub fn noop_fold_tt<T: Folder>(tt: &TokenTree, fld: &mut T) -> TokenTree {
+    match *tt {
+        TokenTree::Token(span, ref tok) =>
+            TokenTree::Token(span, fld.fold_token(tok.clone())),
+        TokenTree::Delimited(span, ref delimed) => {
+            TokenTree::Delimited(span, Rc::new(
+                            tokenstream::Delimited {
+                                delim: delimed.delim,
+                                open_span: delimed.open_span,
+                                tts: fld.fold_tts(&delimed.tts),
+                                close_span: delimed.close_span,
+                            }
+                        ))
+        },
+        TokenTree::Sequence(span, ref seq) =>
+            TokenTree::Sequence(span,
+                       Rc::new(tokenstream::SequenceRepetition {
+                           tts: fld.fold_tts(&seq.tts),
+                           separator: seq.separator.clone().map(|tok| fld.fold_token(tok)),
+                           ..**seq
+                       })),
+    }
+}
+
+pub fn noop_fold_tts<T: Folder>(tts: &[TokenTree], fld: &mut T) -> Vec<TokenTree> {
+    // FIXME: Does this have to take a tts slice?
+    // Could use move_map otherwise...
+    tts.iter().map(|tt| fld.fold_tt(tt)).collect()
+}
+
+// We aren't folding tokens, ever ;)
+pub fn noop_fold_token<T: Folder>(t: token::Token, fld: &mut T) -> token::Token {
+  t
+}
+
+pub fn noop_fold_tokenstream<T: Folder>(ts: TokenStream, fld: &mut T) -> TokenStream {
+    let TokenStream {node, span} = ts;
+    Spanned { node : fld.fold_tts(&node)
+            , span : fld.new_span(span)}
 }
 
 pub fn noop_fold_arg<T: Folder>(Arg { id, pat, ty }: Arg, fld: &mut T) -> Arg {

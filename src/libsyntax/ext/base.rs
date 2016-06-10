@@ -103,18 +103,18 @@ pub trait MultiItemDecorator {
     fn expand(&self,
               ecx: &mut ExtCtxt,
               sp: Span,
-              meta_item: &ast::MetaItem,
+              meta_item: &tokenstream::TokenStream,
               item: &Annotatable,
               push: &mut FnMut(Annotatable));
 }
 
 impl<F> MultiItemDecorator for F
-    where F : Fn(&mut ExtCtxt, Span, &ast::MetaItem, &Annotatable, &mut FnMut(Annotatable))
+    where F : Fn(&mut ExtCtxt, Span, &tokenstream::TokenStream, &Annotatable, &mut FnMut(Annotatable))
 {
     fn expand(&self,
               ecx: &mut ExtCtxt,
               sp: Span,
-              meta_item: &ast::MetaItem,
+              meta_item: &tokenstream::TokenStream,
               item: &Annotatable,
               push: &mut FnMut(Annotatable)) {
         (*self)(ecx, sp, meta_item, item, push)
@@ -129,7 +129,7 @@ pub trait MultiItemModifier {
     fn expand(&self,
               ecx: &mut ExtCtxt,
               span: Span,
-              meta_item: &ast::MetaItem,
+              meta_item: &tokenstream::TokenStream,
               item: Annotatable)
               -> Annotatable;
 }
@@ -137,13 +137,13 @@ pub trait MultiItemModifier {
 impl<F> MultiItemModifier for F
     where F: Fn(&mut ExtCtxt,
                 Span,
-                &ast::MetaItem,
+                &tokenstream::TokenStream,
                 Annotatable) -> Annotatable
 {
     fn expand(&self,
               ecx: &mut ExtCtxt,
               span: Span,
-              meta_item: &ast::MetaItem,
+              meta_item: &tokenstream::TokenStream,
               item: Annotatable)
               -> Annotatable {
         (*self)(ecx, span, meta_item, item)

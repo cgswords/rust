@@ -98,10 +98,11 @@ use syntax::ext::base::{ExtCtxt,Annotatable};
 use syntax::ext::build::AstBuilder;
 use syntax::parse::token;
 use syntax::ptr::P;
+use syntax::tokenstream::{TokenStream};
 
 pub fn expand_deriving_rustc_encodable(cx: &mut ExtCtxt,
                                        span: Span,
-                                       mitem: &MetaItem,
+                                       mitem: &TokenStream,
                                        item: &Annotatable,
                                        push: &mut FnMut(Annotatable))
 {
@@ -110,7 +111,7 @@ pub fn expand_deriving_rustc_encodable(cx: &mut ExtCtxt,
 
 pub fn expand_deriving_encodable(cx: &mut ExtCtxt,
                                  span: Span,
-                                 mitem: &MetaItem,
+                                 mitem: &TokenStream,
                                  item: &Annotatable,
                                  push: &mut FnMut(Annotatable))
 {
@@ -119,7 +120,7 @@ pub fn expand_deriving_encodable(cx: &mut ExtCtxt,
 
 fn expand_deriving_encodable_imp(cx: &mut ExtCtxt,
                                  span: Span,
-                                 mitem: &MetaItem,
+                                 mitem: &TokenStream,
                                  item: &Annotatable,
                                  push: &mut FnMut(Annotatable),
                                  krate: &'static str)

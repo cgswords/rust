@@ -364,29 +364,38 @@ pub fn gather_attr(attr: &ast::Attribute)
                    -> Vec<Result<(InternedString, Level, Span), Span>> {
     let mut out = vec!();
 
+    debug!("attribute for gathering: {:?}", attr);
+    debug!("attribute name: {:?}", attr.name());
     let level = match Level::from_str(&attr.name()) {
-        None => return out,
+        None => {
+          debug!("no level found!");
+          return out
+        }
         Some(lvl) => lvl,
     };
+    debug!("level looks good, keep going");
 
     attr::mark_used(attr);
 
-    let meta = &attr.node.value;
-    let metas = match meta.node {
-        ast::MetaItemKind::List(_, ref metas) => metas,
-        _ => {
-            out.push(Err(meta.span));
-            return out;
-        }
-    };
+    let metas = if let Some(ls) = attr.meta_item_list() {
+                  debug!("meta_item list");
+                  ls            
+                } else {
+                  debug!("attribute {:?} had no meta-item list", attr);
+                  out.push(Err((*attr).node.stream.span));
+                  return out;
+                };
 
     for meta in metas {
-        out.push(match meta.node {
-            ast::MetaItemKind::Word(ref lint_name) => Ok((lint_name.clone(), level, meta.span)),
-            _ => Err(meta.span),
-        });
+        debug!("pushing item");
+        out.push(if let Some(word) = meta.maybe_word() {
+                   Ok((word.clone(), level, meta.span))
+                 } else { 
+                   debug!("meta-item {:?} was not a word", meta);
+                   Err(meta.span) });
     }
 
+   debug!("gather_attr successful");
     out
 }
 
@@ -576,6 +585,8 @@ pub trait LintContext: Sized {
         // specified closure
         let mut pushed = 0;
 
+        debug!("attributes for gathering: {:?}", attrs);
+        debug!("current lint store: {:?}", self);
         for result in gather_attrs(attrs) {
             let v = match result {
                 Err(span) => {

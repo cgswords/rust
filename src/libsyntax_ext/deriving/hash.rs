@@ -17,10 +17,11 @@ use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt, Annotatable};
 use syntax::ext::build::AstBuilder;
 use syntax::ptr::P;
+use syntax::tokenstream::{TokenStream};
 
 pub fn expand_deriving_hash(cx: &mut ExtCtxt,
                             span: Span,
-                            mitem: &MetaItem,
+                            mitem: &TokenStream,
                             item: &Annotatable,
                             push: &mut FnMut(Annotatable))
 {

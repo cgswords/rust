@@ -10,11 +10,11 @@
 
 use ast;
 use attr;
-use codemap::{DUMMY_SP, Span, ExpnInfo, NameAndSpan, MacroAttribute, respan};
+use codemap::{DUMMY_SP, Span, ExpnInfo, NameAndSpan, MacroAttribute};
 use codemap;
 use fold::Folder;
 use fold;
-use parse::token::{intern, InternedString, keywords};
+use parse::token::{intern, keywords};
 use parse::{token, ParseSess};
 use ptr::P;
 use util::small_vector::SmallVector;

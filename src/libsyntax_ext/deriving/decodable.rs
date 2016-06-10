@@ -22,10 +22,11 @@ use syntax::ext::build::AstBuilder;
 use syntax::parse::token::InternedString;
 use syntax::parse::token;
 use syntax::ptr::P;
+use syntax::tokenstream::{TokenStream};
 
 pub fn expand_deriving_rustc_decodable(cx: &mut ExtCtxt,
                                        span: Span,
-                                       mitem: &MetaItem,
+                                       mitem: &TokenStream,
                                        item: &Annotatable,
                                        push: &mut FnMut(Annotatable))
 {
@@ -34,7 +35,7 @@ pub fn expand_deriving_rustc_decodable(cx: &mut ExtCtxt,
 
 pub fn expand_deriving_decodable(cx: &mut ExtCtxt,
                                  span: Span,
-                                 mitem: &MetaItem,
+                                 mitem: &TokenStream,
                                  item: &Annotatable,
                                  push: &mut FnMut(Annotatable))
 {
@@ -43,7 +44,7 @@ pub fn expand_deriving_decodable(cx: &mut ExtCtxt,
 
 fn expand_deriving_decodable_imp(cx: &mut ExtCtxt,
                                  span: Span,
-                                 mitem: &MetaItem,
+                                 mitem: &TokenStream,
                                  item: &Annotatable,
                                  push: &mut FnMut(Annotatable),
                                  krate: &'static str)

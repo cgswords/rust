@@ -71,9 +71,9 @@ impl<'a, 'tcx> DirtyCleanVisitor<'a, 'tcx> {
         debug!("check_config(attr={:?})", attr);
         let config = &self.tcx.map.krate().config;
         debug!("check_config: config={:?}", config);
-        for item in attr.meta_item_list().unwrap_or(&[]) {
+        for item in attr.meta_item_list().unwrap_or(vec![]) {
             if item.check_name(CFG) {
-                let value = self.expect_associated_value(item);
+                let value = self.expect_associated_value(&item);
                 debug!("check_config: searching for cfg {:?}", value);
                 for cfg in &config[..] {
                     if cfg.check_name(&value[..]) {
@@ -88,9 +88,9 @@ impl<'a, 'tcx> DirtyCleanVisitor<'a, 'tcx> {
     }
 
     fn dep_node(&self, attr: &Attribute, def_id: DefId) -> DepNode<DefId> {
-        for item in attr.meta_item_list().unwrap_or(&[]) {
+        for item in attr.meta_item_list().unwrap_or(vec![]) {
             if item.check_name(LABEL) {
-                let value = self.expect_associated_value(item);
+                let value = self.expect_associated_value(&item);
                 match DepNode::from_label_string(&value[..], def_id) {
                     Ok(def_id) => return def_id,
                     Err(()) => {

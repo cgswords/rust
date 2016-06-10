@@ -14,10 +14,11 @@ use deriving::generic::ty::*;
 use syntax::ast::MetaItem;
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt, Annotatable};
+use syntax::tokenstream::{TokenStream};
 
 pub fn expand_deriving_unsafe_bound(cx: &mut ExtCtxt,
                                     span: Span,
-                                    _: &MetaItem,
+                                    _: &TokenStream,
                                     _: &Annotatable,
                                     _: &mut FnMut(Annotatable))
 {
@@ -26,7 +27,7 @@ pub fn expand_deriving_unsafe_bound(cx: &mut ExtCtxt,
 
 pub fn expand_deriving_copy(cx: &mut ExtCtxt,
                             span: Span,
-                            mitem: &MetaItem,
+                            mitem: &TokenStream,
                             item: &Annotatable,
                             push: &mut FnMut(Annotatable))
 {
