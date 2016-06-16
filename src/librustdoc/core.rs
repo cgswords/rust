@@ -141,10 +141,11 @@ pub fn run_core(search_paths: SearchPaths,
                                        codemap, cstore.clone());
     rustc_lint::register_builtins(&mut sess.lint_store.borrow_mut(), Some(&sess));
 
-    let mut cfg = config::build_configuration(&sess);
-    target_features::add_configuration(&mut cfg, &sess);
+    // let mut cfg = config::build_configuration(&sess);
+    // target_features::add_configuration(&mut cfg, &sess);
 
-    let krate = panictry!(driver::phase_1_parse_input(&sess, cfg, &input));
+    // let krate = panictry!(driver::phase_1_parse_input(&sess, cfg, &input));
+    let krate = panictry!(driver::phase_1_parse_input(&sess, &input));
 
     let name = link::find_crate_name(Some(&sess), &krate.attrs,
                                      &input);

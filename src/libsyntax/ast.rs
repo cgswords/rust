@@ -515,7 +515,7 @@ pub enum AttrStyle {
 pub struct AttrId(pub usize);
 
 /// Doc-comments are promoted to attributes that have is_sugared_doc = true
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+#[derive(Clone, Eq, RustcEncodable, RustcDecodable, Hash)]
 pub struct Attribute_ {
     pub id: AttrId,
     pub style: AttrStyle,
@@ -524,7 +524,39 @@ pub struct Attribute_ {
     pub is_sugared_doc: bool,
 }
 
+impl PartialEq for Attribute_ {
+    fn eq(&self, other: &Attribute_) -> bool {
+      if !(self.path == other.path) { return false; }
+      self.stream.unspanned_eq(&other.stream)
+    }
+}
+
+impl fmt::Debug for Attribute_ {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      let preprint = match self.style 
+                     { AttrStyle::Outer => "#"
+                     , AttrStyle::Inner => "#!"
+                     };
+      write!(f, "{}[{:?}|{:?}{:?}]", preprint
+                                       , self.id
+                                       , self.path
+                                       , self.stream)
+    }
+}
+
+
+
 impl Attribute {
+  // This is to support the logic in `librustdoc` without rewriting it all.
+  // It may be worth rewriting that and getting rid of this.
+  pub fn to_metaitem(&self) -> MetaItem {
+    let name = self.node.path.get_last_ident().name.as_str(); 
+    Spanned { span : self.span
+            , node : { MetaItemKind { name : name
+                                    , stream : self.node.stream.clone()
+                                    }}}
+  }
+
   pub fn to_reified_attr(&self) -> Option<ReifiedAttr> {
     let span   = self.span;
     let id     = self.node.id;
@@ -561,6 +593,7 @@ impl Attribute {
     } else { None }
   }
 }
+
 
 pub type ReifiedAttr = Spanned<ReifiedAttr_>;
 
@@ -607,10 +640,25 @@ pub type MetaItem = Spanned<MetaItemKind>;
 
 // PartailEq is current "broken"; it should check things about the set-ness of the
 // TokenStream (see previous implementation below)
-#[derive(Clone, PartialEq, Eq, RustcEncodable, RustcDecodable, Hash, Debug)]
+#[derive(Clone, Eq, RustcEncodable, RustcDecodable, Hash)]
 pub struct MetaItemKind {
     pub name   : InternedString,
     pub stream : TokenStream
+}
+
+impl PartialEq for MetaItemKind {
+    fn eq(&self, other: &MetaItemKind) -> bool {
+      if !(self.name == other.name) { return false; }
+      self.stream.unspanned_eq(&other.stream)
+    }
+}
+
+
+
+impl fmt::Debug for MetaItemKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+      write!(f, "[{}{:?}]", self.name, self.stream)
+    }
 }
 
 impl MetaItem {
@@ -703,7 +751,7 @@ impl ReifiedMetaItem {
       tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
       tts.append(&mut (&l).to_tts());
     }
-    tts_to_ts(tts)
+    TokenStream::as_paren_delimited_stream(tts)
   }
 
   pub fn recover_vec_tokenstream(mut ls : Vec<MetaItem>) -> TokenStream {
@@ -715,7 +763,7 @@ impl ReifiedMetaItem {
       tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
       tts.append(&mut l.to_tts());
     }
-    tts_to_ts(tts)
+    TokenStream::as_paren_delimited_stream(tts)
   }
 }
 

@@ -19,7 +19,7 @@ use ast::{AttrId, Attribute, Attribute_, ReifiedAttr, ReifiedAttr_};
 use ast::{MetaItem, MetaItemKind, ReifiedMetaItem, ReifiedMetaItem_, reify_metaitem_list};
 use ast::{Stmt, StmtKind, DeclKind};
 use ast::{Expr, Item, Local, Decl};
-use codemap::{Span, Spanned, spanned, dummy_spanned, mk_sp};
+use codemap::{Span, Spanned, spanned, dummy_spanned, mk_sp, DUMMY_SP};
 use codemap::BytePos;
 use config::CfgDiag;
 use errors::Handler;
@@ -447,10 +447,12 @@ impl AttributeMethods for Attribute {
         F: FnOnce(&Attribute) -> T,
     {
         if self.node.is_sugared_doc {
+            debug!("Converting a sugared doc: {:?}", self);
             let comment = self.value_str().unwrap();
             let meta = mk_name_value_item_str(
                 InternedString::new("doc"),
                 token::intern_and_get_ident(&strip_doc_comment_decoration(&comment)));
+            debug!("Decorating as: {:?}", meta);
             if self.node.style == ast::AttrStyle::Outer {
                 f(&mk_attr_outer(self.node.id, meta))
             } else {
@@ -466,8 +468,14 @@ impl AttributeMethods for Attribute {
 pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
                               -> P<MetaItem> {
   let value_lit = dummy_spanned(ast::LitKind::Str(value, ast::StrStyle::Cooked));
+  debug!("Setting up new attribute with RHS: {:?}", value_lit);
+  let rhs = tokenstream::TokenStream::from_ast_lit_str(value_lit);
+  let eq = tokenstream::TokenTree::Token(DUMMY_SP, token::Token::Eq);
+  let ts = tokenstream::cons_tt_ts(eq, rhs);
+
+  debug!("Attribute as tokenstream: {:?}", ts);
   P(dummy_spanned(MetaItemKind { name   : name
-                               , stream : tokenstream::TokenStream::from_ast_lit_str(value_lit)
+                               , stream : ts
                                }))
 }
 
@@ -547,6 +555,8 @@ pub fn mk_doc_attr_outer(id: AttrId, item: P<MetaItem>, doc: bool) -> Attribute 
 
 /// Returns a new attribute with the appropriate style
 pub fn mk_attr(id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) -> Attribute {
+  debug!("Making attribute");
+  debug!("  item: {:?}", item);
     dummy_spanned(Attribute_ {
         id: id,
         style: style,
@@ -559,6 +569,8 @@ pub fn mk_attr(id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) -> Attribu
 /// Returns a new attribute with the appropriate style
 pub fn mk_spanned_attr(span : Span, id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) 
                        -> Attribute {
+  debug!("Making spanned attribute");
+  debug!("  item: {:?}", item);
     Spanned { node : Attribute_ {
                        id: id,
                        style: style,
@@ -584,11 +596,14 @@ pub fn mk_sugared_doc_attr(id: AttrId, text: InternedString, lo: BytePos,
                            -> Attribute {
     let style = doc_comment_style(&text);
     let lit = spanned(lo, hi, ast::LitKind::Str(text, ast::StrStyle::Cooked));
+    let rhs = tokenstream::TokenStream::from_ast_lit_str(lit);
+    let eq = tokenstream::TokenTree::Token(DUMMY_SP, token::Token::Eq);
+    let ts = tokenstream::cons_tt_ts(eq, rhs);
     let attr = Attribute_ {
         id: id,
         style: style,
         path : ast::Path::from_ident(mk_sp(lo, hi), str_to_ident("doc")),
-        stream : tokenstream::TokenStream::from_ast_lit_str(lit),
+        stream : ts, 
         is_sugared_doc: true
     };
     spanned(lo, hi, attr)
@@ -652,6 +667,7 @@ pub fn contains(haystack: &[P<MetaItem>], needle: &MetaItem) -> bool {
     debug!("attr::contains (name={})", needle.name());
     haystack.iter().any(|ref item| {
         debug!("  testing: {}", item.name());
+        // debug!("  testing: {:?}", item);
         item.node == needle.node
     })
 }
@@ -787,9 +803,11 @@ pub fn requests_inline(attrs: &[Attribute]) -> bool {
 pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
                            cfg: &ast::MetaItem,
                            diag: &mut T) -> bool {
+  debug!("Parsing config with name: {:?}", cfg.name());
   if cfg.is_list() {
     let name = cfg.name();
       if let Some(items) = cfg.meta_item_list() {
+        debug!("Treating configuration as list");
         match &name[..] 
           { "any" => items.iter().any(|mi| cfg_matches(cfgs, &mi, diag))
           , "all" => items.iter().all(|mi| cfg_matches(cfgs, &mi, diag))
@@ -818,11 +836,14 @@ pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
        false
      }
   } else if cfg.is_name() || cfg.is_assign() {
+    debug!("Treating configuration as assignment or name");
     diag.flag_gated(|feature_gated_cfgs| {
       feature_gated_cfgs.extend(
         GatedCfg::gate(cfg).map(GatedCfgAttr::GatedCfg));
     });
-    contains(cfgs, cfg)
+    let res = contains(cfgs, cfg);
+    debug!("Contains came back as: {:?}", res);
+    res
   } else {
     diag.emit_error(|diagnostic| {
       diagnostic.span_err(cfg.span, &format!("Invalid metaitem `{:?}`", cfg));

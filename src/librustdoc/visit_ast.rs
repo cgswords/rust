@@ -331,8 +331,12 @@ impl<'a, 'tcx> RustdocVisitor<'a, 'tcx> {
                 let node = if item.vis == hir::Public {
                     let please_inline = item.attrs.iter().any(|item| {
                         match item.meta_item_list() {
-                            Some(list) if &item.name()[..] == "doc" => {
+                            Some(list) => {
+                              if &item.name()[..] == "doc" {
                                 list.iter().any(|i| &i.name()[..] == "inline")
+                              } else {
+                                false 
+                              }
                             }
                             _ => false,
                         }

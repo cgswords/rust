@@ -591,9 +591,9 @@ pub fn noop_fold_token<T: Folder>(t: token::Token, fld: &mut T) -> token::Token 
 }
 
 pub fn noop_fold_tokenstream<T: Folder>(ts: TokenStream, fld: &mut T) -> TokenStream {
-    let TokenStream {node, span} = ts;
-    Spanned { node : fld.fold_tts(&node)
-            , span : fld.new_span(span)}
+    let TokenStream {tts, span} = ts;
+    TokenStream { tts : fld.fold_tts(&tts)
+                , span : fld.new_span(span)}
 }
 
 // apply ident folder if it's an ident, apply other folds to interpolated nodes

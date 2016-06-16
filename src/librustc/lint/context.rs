@@ -39,6 +39,7 @@ use std::cell::RefCell;
 use std::cmp;
 use std::default::Default as StdDefault;
 use std::mem;
+use std::fmt;
 use syntax::attr::{self, AttrMetaMethods};
 use syntax::codemap::Span;
 use syntax::errors::DiagnosticBuilder;
@@ -83,15 +84,24 @@ pub struct LintStore {
     lint_cap: Option<Level>,
 }
 
+impl fmt::Debug for LintStore {
+  fn fmt(&self, f :&mut fmt::Formatter) -> fmt::Result {
+    write!(f, "Lints include: {:?}", self.lints);
+    write!(f, "by name: {:?}", self.by_name)
+  }
+}
+
 /// Extra information for a future incompatibility lint. See the call
 /// to `register_future_incompatible` in `librustc_lint/lib.rs` for
 /// guidelines.
+#[derive(Debug)]
 pub struct FutureIncompatibleInfo {
     pub id: LintId,
     pub reference: &'static str // e.g., a URL for an issue/PR/RFC or error code
 }
 
 /// The targed of the `by_name` map, which accounts for renaming/deprecation.
+#[derive(Debug)]
 enum TargetLint {
     /// A direct lint target
     Id(LintId),
@@ -364,7 +374,6 @@ pub fn gather_attr(attr: &ast::Attribute)
                    -> Vec<Result<(InternedString, Level, Span), Span>> {
     let mut out = vec!();
 
-    debug!("attribute for gathering: {:?}", attr);
     debug!("attribute name: {:?}", attr.name());
     let level = match Level::from_str(&attr.name()) {
         None => {
@@ -374,6 +383,8 @@ pub fn gather_attr(attr: &ast::Attribute)
         Some(lvl) => lvl,
     };
     debug!("level looks good, keep going");
+    debug!("attribute for gathering: {:?}", attr);
+    debug!("span printed: {:?}", attr.span);
 
     attr::mark_used(attr);
 
@@ -586,7 +597,11 @@ pub trait LintContext: Sized {
         let mut pushed = 0;
 
         debug!("attributes for gathering: {:?}", attrs);
-        debug!("current lint store: {:?}", self);
+        debug!("current lint store: {:?}", self.lints());
+        for attr in attrs {
+          debug!("attributes: {:?}", self.sess().codemap().lookup_char_pos(attr.span.lo));
+          debug!("attributes: {:?}", self.sess().codemap().lookup_char_pos(attr.span.lo));
+        }
         for result in gather_attrs(attrs) {
             let v = match result {
                 Err(span) => {

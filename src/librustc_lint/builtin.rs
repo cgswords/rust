@@ -307,8 +307,10 @@ impl MissingDoc {
             }
         }
 
+        debug!("looking for docs in {:?}", attrs);
         let has_doc = attrs.iter().any(|a| {
            if let Some((name, _)) = a.maybe_assign() {
+             debug!("  Found an assignment called {:?}", name);
              if name == "doc"{ 
                true
              } else {

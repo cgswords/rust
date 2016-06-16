@@ -832,7 +832,7 @@ pub trait PrintState<'a> {
     }
 
     fn print_tokenstream(&mut self, ts: &tokenstream::TokenStream) -> io::Result<()> {
-      self.print_tts(&ts.node)
+      self.print_tts(&ts.get_tts())
     }
 
 

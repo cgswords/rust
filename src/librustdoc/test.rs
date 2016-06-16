@@ -90,9 +90,12 @@ pub fn run(input: &str,
                                        cstore.clone());
     rustc_lint::register_builtins(&mut sess.lint_store.borrow_mut(), Some(&sess));
 
-    let mut cfg = config::build_configuration(&sess);
-    cfg.extend(config::parse_cfgspecs(cfgs.clone()));
-    let krate = panictry!(driver::phase_1_parse_input(&sess, cfg, &input));
+    // let mut cfg = config::build_configuration(&sess);
+    // This is gonna kill us, watch:
+    // cfg.extend(config::parse_cfgspecs(cfgs.clone()));
+
+    // let krate = panictry!(driver::phase_1_parse_input(&sess, cfg, &input));
+    let krate = panictry!(driver::phase_1_parse_input(&sess, &input));
     let krate = driver::phase_2_configure_and_expand(&sess, &cstore, krate,
                                                      "rustdoc-test", None)
         .expect("phase_2_configure_and_expand aborted in rustdoc!");
@@ -168,7 +171,7 @@ fn scrape_test_config(krate: &::rustc::hir::Crate) -> TestOptions {
         if attr.check_name("attr") {
             if let Some(l) = attr.meta_item_list() {
                 for item in l {
-                    opts.attrs.push(pprust::meta_item_to_string(item));
+                    opts.attrs.push(pprust::meta_item_to_string(&item));
                 }
             }
         }
@@ -263,7 +266,7 @@ fn runtest(test: &str, cratename: &str, cfgs: Vec<String>, libs: SearchPaths,
     }
 
     let res = panic::catch_unwind(AssertUnwindSafe(|| {
-        driver::compile_input(&sess, &cstore, cfg.clone(),
+        driver::compile_input(&sess, &cstore, // cfg.clone(),
                               &input, &out,
                               &None, None, &control)
     }));

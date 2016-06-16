@@ -61,6 +61,8 @@ use syntax::visit;
 use syntax;
 use syntax_ext;
 
+use target_features;
+
 #[derive(Clone)]
 pub struct Resolutions {
     pub def_map: DefMap,
@@ -71,7 +73,7 @@ pub struct Resolutions {
 
 pub fn compile_input(sess: &Session,
                      cstore: &CStore,
-                     cfg: ast::CrateConfig,
+                     // cfg: ast::CrateConfig,
                      input: &Input,
                      outdir: &Option<PathBuf>,
                      output: &Option<PathBuf>,
@@ -96,7 +98,8 @@ pub fn compile_input(sess: &Session,
     // possible to keep the peak memory usage low
     let (outputs, trans) = {
         let (outputs, expanded_crate, id) = {
-            let krate = match phase_1_parse_input(sess, cfg, input) {
+            // let krate = match phase_1_parse_input(sess, cfg, input) {
+            let krate = match phase_1_parse_input(sess, input) {
                 Ok(krate) => krate,
                 Err(mut parse_error) => {
                     parse_error.emit();
@@ -259,6 +262,7 @@ pub fn compile_input(sess: &Session,
 
             // Discard interned strings as they are no longer required.
             token::get_ident_interner().clear();
+
 
             Ok((outputs, trans))
         })??
@@ -522,7 +526,7 @@ impl<'a, 'b, 'ast, 'tcx> CompileState<'a, 'b, 'ast, 'tcx> {
 }
 
 pub fn phase_1_parse_input<'a>(sess: &'a Session,
-                               cfg: ast::CrateConfig,
+                               // cfg: ast::CrateConfig,
                                input: &Input)
                                -> PResult<'a, ast::Crate> {
     // These may be left in an incoherent state after a previous compile.
@@ -530,6 +534,12 @@ pub fn phase_1_parse_input<'a>(sess: &'a Session,
     // memory, but they do not restore the initial state.
     syntax::ext::mtwt::reset_tables();
     token::reset_ident_interner();
+
+
+    // Do the configuration after interner reset
+    let mut cfg = config::build_configuration(&sess);
+    target_features::add_configuration(&mut cfg, &sess);
+
     let continue_after_error = sess.opts.continue_parse_after_error;
     sess.diagnostic().set_continue_after_error(continue_after_error);
 

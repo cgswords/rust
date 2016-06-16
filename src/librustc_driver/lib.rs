@@ -208,14 +208,18 @@ pub fn run_compiler_with_file_loader<'a, L>(args: &[String],
                                                    cstore.clone(),
                                                    codemap);
     rustc_lint::register_builtins(&mut sess.lint_store.borrow_mut(), Some(&sess));
-    let mut cfg = config::build_configuration(&sess);
-    target_features::add_configuration(&mut cfg, &sess);
+    // Moved the following to `driver.rs`, after the interner is cleared.
+    // let mut cfg = config::build_configuration(&sess);
+    // target_features::add_configuration(&mut cfg, &sess);
 
     do_or_return!(callbacks.late_callback(&matches, &sess, &input, &odir, &ofile), Some(sess));
 
     let plugins = sess.opts.debugging_opts.extra_plugins.clone();
     let control = callbacks.build_controller(&sess, &matches);
-    (driver::compile_input(&sess, &cstore, cfg, &input, &odir, &ofile,
+    // (driver::compile_input(&sess, &cstore, cfg, &input, &odir, &ofile,
+    //                        Some(plugins), &control),
+    //  Some(sess))
+    (driver::compile_input(&sess, &cstore, &input, &odir, &ofile,
                            Some(plugins), &control),
      Some(sess))
 }

@@ -464,9 +464,11 @@ impl Attributes for [Attribute] {
 
     /// Finds an attribute as NameValue and returns the corresponding value found.
     fn value<'a>(&'a self, name: &str) -> Option<&'a str> {
+        debug!("Looking for {:?} in: {:?}", name, self);
         for attr in self {
             if let NameValue(ref x, ref v) = *attr {
                 if name == *x {
+                    debug!("Found it! {:?}", v);
                     return Some(v);
                 }
             }
@@ -496,32 +498,49 @@ pub enum Attribute {
 
 impl Clean<Attribute> for ast::MetaItem {
     fn clean(&self, cx: &DocContext) -> Attribute {
-        match self.node {
-            ast::MetaItemKind::Word(ref s) => Word(s.to_string()),
-            ast::MetaItemKind::List(ref s, ref l) => {
-                List(s.to_string(), l.clean(cx))
-            }
-            ast::MetaItemKind::NameValue(ref s, ref v) => {
-                NameValue(s.to_string(), lit_to_string(v))
-            }
-        }
+      if let Some(word) = self.maybe_word() {
+        Word(word.to_string())
+      } else if let Some((word, lit)) = self.maybe_assign() {
+        NameValue(word.to_string(), lit.to_string())
+      } else if let Some(ls) = self.meta_item_list() {
+        List(self.name().to_string(), ls.clean(cx))
+      } else {
+        // What do here?
+        panic!("Invalid attribute: {:?}", self)
+      }
+
+      // What is the cleaning doing here?
+      // What's the point? I guess to convert it to Attribute.
+      //
+      // match self.node {
+      //     if 
+      //       ast::MetaItemKind::Word(ref s) => Word(s.to_string()),
+      //       ast::MetaItemKind::List(ref s, ref l) => {
+      //           List(s.to_string(), l.clean(cx))
+      //       }
+      //       ast::MetaItemKind::NameValue(ref s, ref v) => {
+      //           NameValue(s.to_string(), lit_to_string(v))
+      //       }
+      //   }
     }
 }
 
 impl Clean<Attribute> for ast::Attribute {
     fn clean(&self, cx: &DocContext) -> Attribute {
-        self.with_desugared_doc(|a| a.node.value.clean(cx))
+        debug!("Cleaning attribute: {:?}", self);
+        self.with_desugared_doc(|a| a.to_metaitem().clean(cx))
+    //  self.with_desugared_doc(|a| a.node.value.clean(cx))
     }
 }
 
 // This is a rough approximation that gets us what we want.
 impl attr::AttrMetaMethods for Attribute {
     fn name(&self) -> InternedString {
-        match *self {
-            Word(ref n) | List(ref n, _) | NameValue(ref n, _) => {
-                token::intern_and_get_ident(n)
-            }
-        }
+      match *self {
+          Word(ref n) | List(ref n, _) | NameValue(ref n, _) => {
+              token::intern_and_get_ident(n)
+          }
+      }
     }
 
     fn value_str(&self) -> Option<InternedString> {
@@ -532,7 +551,7 @@ impl attr::AttrMetaMethods for Attribute {
             _ => None,
         }
     }
-    fn meta_item_list<'a>(&'a self) -> Option<&'a [P<ast::MetaItem>]> { None }
+    fn meta_item_list(&self) -> Option<Vec<P<ast::MetaItem>>> { None }
 
 
     fn is_name(&self) -> bool { 
@@ -2430,7 +2449,7 @@ impl Clean<Vec<Item>> for doctree::Import {
         // #[doc(no_inline)] attribute is present.
         let denied = self.vis != hir::Public || self.attrs.iter().any(|a| {
             &a.name()[..] == "doc" && match a.meta_item_list() {
-                Some(l) => attr::contains_name(l, "no_inline"),
+                Some(l) => attr::contains_name(&l, "no_inline"),
                 None => false,
             }
         });

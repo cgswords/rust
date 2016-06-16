@@ -29,6 +29,7 @@ impl<'a> Parser<'a> {
                     attrs.push(self.parse_attribute(false)?);
                 }
                 token::DocComment(s) => {
+                    debug!("Making doc comment!");
                     let attr = ::attr::mk_sugared_doc_attr(
                     attr::mk_attr_id(),
                     self.id_to_interned_str(ast::Ident::with_empty_ctxt(s)),

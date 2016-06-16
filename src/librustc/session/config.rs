@@ -744,6 +744,7 @@ pub fn default_configuration(sess: &Session) -> ast::CrateConfig {
         mk(InternedString::new("target_env"), intern(env)),
         mk(InternedString::new("target_vendor"), intern(vendor)),
     ];
+    debug!("Result of configurations: {:?}", ret);
     match &fam[..] {
         "windows" | "unix" => ret.push(attr::mk_word_item(fam)),
         _ => (),

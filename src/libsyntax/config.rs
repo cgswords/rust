@@ -68,6 +68,7 @@ impl<'a> StripUnconfigured<'a> {
                 return None;
             }
         };
+        
         let (cfg, mi) = match (attr_list.len(), attr_list.get(0), attr_list.get(1)) {
             (2, Some(cfg), Some(mi)) => (cfg, mi),
             _ => {
@@ -90,8 +91,13 @@ impl<'a> CfgFolder for StripUnconfigured<'a> {
     // configuration based on the item's attributes
     fn in_cfg(&mut self, attrs: &[ast::Attribute]) -> bool {
         attrs.iter().all(|attr| {
-            if !attr.check_name("cfg") { return true; }
+						// When not compiling with --test we should not compile the #[test] functions
+            // if !self.should_test && is_test_or_bench(attr) {
+            //   return false;
+						// }
 
+            if !attr.check_name("cfg") { return true; }
+            debug!("Adding cfg: {:?}", attr);
             if let Some(mis) = attr.meta_item_list() {
               if mis.len() != 1 {
                   self.diag.emit_error(|diagnostic| {
@@ -100,6 +106,7 @@ impl<'a> CfgFolder for StripUnconfigured<'a> {
                   return true;
               }
 
+              debug!("Parsing cfg: {:?}", mis);
               attr::cfg_matches(self.config, &mis[0], &mut self.diag)
             } else {
               true
