@@ -10,7 +10,7 @@
 
 //! The compiler code necessary to implement the `#[derive]` extensions.
 
-use syntax::ast::{MetaItem, MetaItemKind, self};
+use syntax::ast;
 use syntax::attr::AttrMetaMethods;
 use syntax::ext::base::{ExtCtxt, SyntaxEnv, Annotatable};
 use syntax::ext::base::{MultiDecorator, MultiItemDecorator, MultiModifier};
@@ -19,7 +19,7 @@ use syntax::feature_gate;
 use syntax::codemap::{self, Span};
 use syntax::parse::token::{intern, intern_and_get_ident};
 use syntax::ptr::P;
-use syntax::tokenstream::{self, TokenStream};
+use syntax::tokenstream::TokenStream;
 
 macro_rules! pathvec {
     ($($x:ident)::+) => (

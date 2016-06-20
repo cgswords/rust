@@ -30,18 +30,19 @@ impl<'a> Parser<'a> {
                 }
                 token::DocComment(s) => {
                     debug!("Making doc comment!");
-                    let attr = ::attr::mk_sugared_doc_attr(
-                    attr::mk_attr_id(),
-                    self.id_to_interned_str(ast::Ident::with_empty_ctxt(s)),
-                    self.span.lo,
-                    self.span.hi
-                );
+                    let name = self.id_to_interned_str(ast::Ident::with_empty_ctxt(s));
+                    let attr = ::attr::mk_sugared_doc_attr(attr::mk_attr_id(), 
+                                                           name,
+                                                           self.span.lo,
+                                                           self.span.hi);
+
                     if attr.node.style != ast::AttrStyle::Outer {
                         let mut err = self.fatal("expected outer doc comment");
                         err.note("inner doc comments like this (starting with \
                                   `//!` or `/*!`) can only appear before items");
                         return Err(err);
                     }
+                    debug!("Doc comment: {:?}", attr);
                     attrs.push(attr);
                     self.bump();
                 }
@@ -56,7 +57,7 @@ impl<'a> Parser<'a> {
     /// If permit_inner is true, then a leading `!` indicates an inner
     /// attribute
     pub fn parse_attribute(&mut self, permit_inner: bool) -> PResult<'a, ast::Attribute> {
-        debug!("parse_attributes: permit_inner={:?} self.token={:?}",
+        debug!("parse_attribute: permit_inner={:?} self.token={:?}",
                permit_inner,
                self.token);
         let (span, path, stream, mut style) = match self.token {

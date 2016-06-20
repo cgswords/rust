@@ -15,7 +15,7 @@ use deriving::generic::*;
 use deriving::generic::ty::*;
 
 use syntax::ast;
-use syntax::ast::{MetaItem, Expr, Mutability};
+use syntax::ast::{Expr, Mutability};
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt, Annotatable};
 use syntax::ext::build::AstBuilder;

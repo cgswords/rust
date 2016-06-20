@@ -246,10 +246,6 @@ pub trait Folder : Sized {
         noop_fold_tts(tts, self)
     }
 
-    fn fold_token(&mut self, t: token::Token) -> token::Token {
-        noop_fold_token(t, self)
-    }
-
     fn fold_tokenstream(&mut self, ts: TokenStream) -> TokenStream {
         noop_fold_tokenstream(ts, self)
     }
@@ -509,7 +505,8 @@ pub fn noop_fold_meta_item<T: Folder>(mi: P<MetaItem>, fld: &mut T) -> P<MetaIte
 pub fn noop_fold_tt<T: Folder>(tt: &TokenTree, fld: &mut T) -> TokenTree {
     match *tt {
         TokenTree::Token(span, ref tok) =>
-            TokenTree::Token(span, fld.fold_token(tok.clone())),
+            //TokenTree::Token(span, fld.fold_token(tok.clone())),
+            TokenTree::Token(span, tok.clone()),
         TokenTree::Delimited(span, ref delimed) => {
             TokenTree::Delimited(span, Rc::new(
                             tokenstream::Delimited {
@@ -524,7 +521,7 @@ pub fn noop_fold_tt<T: Folder>(tt: &TokenTree, fld: &mut T) -> TokenTree {
             TokenTree::Sequence(span,
                        Rc::new(tokenstream::SequenceRepetition {
                            tts: fld.fold_tts(&seq.tts),
-                           separator: seq.separator.clone().map(|tok| fld.fold_token(tok)),
+                           separator: seq.separator.clone(),
                            ..**seq
                        })),
     }
@@ -537,9 +534,9 @@ pub fn noop_fold_tts<T: Folder>(tts: &[TokenTree], fld: &mut T) -> Vec<TokenTree
 }
 
 // We aren't folding tokens, ever ;)
-pub fn noop_fold_token<T: Folder>(t: token::Token, fld: &mut T) -> token::Token {
-  t
-}
+// pub fn noop_fold_token<T: Folder>(t: token::Token, fld: &mut T) -> token::Token {
+//   t
+// }
 
 pub fn noop_fold_tokenstream<T: Folder>(ts: TokenStream, fld: &mut T) -> TokenStream {
     let TokenStream {tts, span} = ts;

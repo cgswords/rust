@@ -92,7 +92,7 @@ use deriving;
 use deriving::generic::*;
 use deriving::generic::ty::*;
 
-use syntax::ast::{MetaItem, Expr, ExprKind, Mutability};
+use syntax::ast::{Expr, ExprKind, Mutability};
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt,Annotatable};
 use syntax::ext::build::AstBuilder;

@@ -36,7 +36,7 @@ use util::nodemap::{FnvHashMap, FnvHashSet};
 use std::cmp;
 use std::fmt;
 use syntax::ast;
-use syntax::attr::{AttributeMethods, AttrMetaMethods};
+use syntax::attr::{AttrMetaMethods};
 use syntax::codemap::Span;
 use syntax::errors::DiagnosticBuilder;
 

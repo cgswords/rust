@@ -11,7 +11,7 @@
 use deriving::generic::*;
 use deriving::generic::ty::*;
 
-use syntax::ast::{Expr, ItemKind, Generics, MetaItem, VariantData};
+use syntax::ast::{Expr, ItemKind, Generics, VariantData};
 use syntax::attr;
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt, Annotatable};

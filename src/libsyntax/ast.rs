@@ -19,6 +19,7 @@ use attr::{ThinAttributes, HasAttrs};
 use codemap::{mk_sp, respan, Span, Spanned, DUMMY_SP, ExpnId, dummy_spanned};
 use abi::Abi;
 use errors;
+use parse;
 use parse::token::{self, keywords, InternedString, Token};
 use parse::token::Lit as PLit;
 use print::pprust;
@@ -558,6 +559,7 @@ impl Attribute {
   }
 
   pub fn to_reified_attr(&self) -> Option<ReifiedAttr> {
+    debug!("Reifying: {:?}", self);
     let span   = self.span;
     let id     = self.node.id;
     let path   = self.node.path.clone();
@@ -569,9 +571,16 @@ impl Attribute {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
             PLit::Str_(name) => {
-              // TODO Figure out how to get the span for the string literal
+              // TODO Consider rewriting this with maybe_str_ast_lit
               let lit = dummy_spanned(LitKind::Str(token::InternedString::new_from_name(name),
                                       StrStyle::Cooked));
+              Some(Spanned { node : ReifiedAttr_::Assign(id, path, lit), span : span})
+            }
+            PLit::StrRaw(s,n) => {
+              let lit = dummy_spanned(LitKind::Str(
+                                        token::intern_and_get_ident(
+                                          &parse::raw_str_lit(&s.as_str())),
+                                        StrStyle::Raw(n)));
               Some(Spanned { node : ReifiedAttr_::Assign(id, path, lit), span : span})
             }
             _ => None,
@@ -663,6 +672,7 @@ impl fmt::Debug for MetaItemKind {
 
 impl MetaItem {
   pub fn to_reified_metaitem(&self) -> Option<ReifiedMetaItem> {
+    debug!("Reifying: {:?}", self);
     let span = self.span;
     let name = self.node.name.clone();
 

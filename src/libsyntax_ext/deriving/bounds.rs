@@ -11,7 +11,6 @@
 use deriving::generic::*;
 use deriving::generic::ty::*;
 
-use syntax::ast::MetaItem;
 use syntax::codemap::Span;
 use syntax::ext::base::{ExtCtxt, Annotatable};
 use syntax::tokenstream::{TokenStream};

@@ -12,7 +12,7 @@ use deriving::generic::*;
 use deriving::generic::ty::*;
 
 use syntax::ast;
-use syntax::ast::{MetaItem, Expr};
+use syntax::ast::{Expr};
 use syntax::codemap::{Span, respan, DUMMY_SP};
 use syntax::ext::base::{ExtCtxt, Annotatable};
 use syntax::ext::build::AstBuilder;

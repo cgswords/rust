@@ -86,7 +86,7 @@ pub struct LintStore {
 
 impl fmt::Debug for LintStore {
   fn fmt(&self, f :&mut fmt::Formatter) -> fmt::Result {
-    write!(f, "Lints include: {:?}", self.lints);
+    write!(f, "Lints include: {:?}", self.lints)?;
     write!(f, "by name: {:?}", self.by_name)
   }
 }

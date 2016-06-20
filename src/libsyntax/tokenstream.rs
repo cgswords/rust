@@ -588,7 +588,12 @@ impl TokenStream {
                                ast::StrStyle::Cooked);
           Some(Spanned { node : l , span : (*self).span})
         }
-        _ => None
+      , TokenTree::Token(_, Token::Literal(Lit::StrRaw(s, n),_)) => {
+          let l = LitKind::Str(token::intern_and_get_ident(&parse::raw_str_lit(&s.as_str())),
+                               ast::StrStyle::Raw(n));
+          Some(Spanned { node : l , span : (*self).span})
+        }
+      , _ => None
       }
   }
 
