@@ -565,8 +565,10 @@ impl Attribute {
     let path   = self.node.path.clone();
 
     if self.node.stream.is_empty() {
+      debug!("Reifying empty: {:?}", self.node.stream);
       Some(Spanned { node : ReifiedAttr_::Word(id,path), span : span})
     } else if self.node.stream.is_assignment() {
+      debug!("Reifying assignment: {:?}", self.node.stream);
       if let Some(rhs) = self.node.stream.maybe_assignment() {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
@@ -585,21 +587,35 @@ impl Attribute {
             }
             _ => None,
           }
-        } else { None }
-      } else { None }
+        } else { 
+          debug!("Wasn't a literal RHS.");
+          None 
+        }
+      } else { 
+        debug!("Wasn't actually an assignment.");
+        None 
+      }
     } else if self.node.stream.is_delimited() {
+      debug!("Reifying delimited stream; trying to comma-separate");
       if let Some(ls) = self.node.stream.maybe_comma_list() {
         let mut items : Vec<MetaItem> = Vec::new();
         for l in ls {
           if let Some(item) = l.maybe_metaitem() {
             items.push(item);
           } else {
+            debug!("Item wasn't a metaitem: {:?}", l);
             return None;
           }
         }
         Some(Spanned { node : ReifiedAttr_::List(id, path, items), span : span})
-     } else { None }
-    } else { None }
+      } else { 
+        debug!("Item wasn't a comma-list: {:?}", self.node.stream);
+        None 
+      }
+    } else { 
+      debug!("Item wasn't empty, assignment, or delimited: {:?}", self.node.stream);
+      None 
+    }
   }
 }
 
@@ -677,8 +693,10 @@ impl MetaItem {
     let name = self.node.name.clone();
 
     if self.node.stream.is_empty() {
+      debug!("Reifying empty: {:?}", self.node.stream);
       Some(Spanned { node : ReifiedMetaItem_::Word(name), span : span})
     } else if self.node.stream.is_assignment() {
+      debug!("Reifying assignment: {:?}", self.node.stream);
       if let Some(rhs) = self.node.stream.maybe_assignment() {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
@@ -688,21 +706,35 @@ impl MetaItem {
             }
             _ => None,
           }
-        } else { None }
-      } else { None }
+        } else { 
+          debug!("Wasn't a literal RHS.");
+          None 
+        }
+      } else { 
+        debug!("Wasn't actually an assignment.");
+        None 
+      }
     } else if self.node.stream.is_delimited() {
+      debug!("Reifying delimited stream; trying to comma-separate");
       if let Some(ls) = self.node.stream.maybe_comma_list() {
         let mut items : Vec<MetaItem> = Vec::new();
         for l in ls {
           if let Some(item) = l.maybe_metaitem() {
             items.push(item);
           } else {
+            debug!("Item wasn't a metaitem: {:?}", l);
             return None;
           }
         }
         Some(Spanned { node : ReifiedMetaItem_::List(name, items), span : span})
-     } else { None }
-    } else { None }
+      } else { 
+        debug!("Item wasn't a comma-list: {:?}", self.node.stream);
+        None 
+      }
+    } else { 
+      debug!("Item wasn't empty, assignment, or delimited: {:?}", self.node.stream);
+      None 
+    }
   }
 
   pub fn to_tts(&self) -> Vec<TokenTree> {

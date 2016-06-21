@@ -2352,9 +2352,10 @@ macro_rules! from_str_radix_int_impl {
 }
 from_str_radix_int_impl! { isize i8 i16 i32 i64 usize u8 u16 u32 u64 }
 
+// #[derive(Debug, Copy, Clone)]
 /// The error type returned when a checked integral type conversion fails.
 #[unstable(feature = "try_from", issue = "33417")]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TryFromIntError(());
 
 impl TryFromIntError {

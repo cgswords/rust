@@ -284,8 +284,10 @@ impl AttrMetaMethods for MetaItem {
 
     fn meta_item_list(&self) -> Option<Vec<P<MetaItem>>> {
       if let Some(ra) = self.to_reified_metaitem() {
+        debug!("  Reified metaitem: {:?}", ra);
         ra.meta_item_list()
       } else {
+        debug!("Didn't get a reified metaitem.");
         None
       }
     }
@@ -805,9 +807,9 @@ pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
                            diag: &mut T) -> bool {
   debug!("Parsing config with name: {:?}", cfg.name());
   if cfg.is_list() {
+    debug!("Treating configuration as list");
     let name = cfg.name();
       if let Some(items) = cfg.meta_item_list() {
-        debug!("Treating configuration as list");
         match &name[..] 
           { "any" => items.iter().any(|mi| cfg_matches(cfgs, &mi, diag))
           , "all" => items.iter().all(|mi| cfg_matches(cfgs, &mi, diag))

@@ -15,7 +15,7 @@ use ext::tt::macro_parser;
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
 use parse::lexer;
 use parse;
-use parse::token::{self, Token, Lit, intern_and_get_ident, InternedString};
+use parse::token::{self, Token, Lit, intern_and_get_ident, InternedString, Nonterminal};
 use parse::token::Lit as PLit;
 use std::rc::Rc;
 use std::fmt;
@@ -532,8 +532,12 @@ impl TokenStream {
       let fst_tt = ts.pop();
       match fst_tt
         { Some(TokenTree::Token(_, Token::Comma)) => {
-            res.push(tts_to_ts(current_ts));
-            current_ts = Vec::new();
+            if ts.len() == 1 && ts[0].len() == 0 {
+              break; // support (a,b,c,) as [a,b,c]
+            } else {
+              res.push(tts_to_ts(current_ts));
+              current_ts = Vec::new();
+            }
           }
         , Some(t) => { current_ts.push(t); }
         , None    => {} // How did we get here?
@@ -546,14 +550,27 @@ impl TokenStream {
 
   /// Convert a tokenstream to a metaitem
   pub fn maybe_metaitem(&self) -> Option<ast::MetaItem> {
-    let sp = (*self).span;
-    if let Some((id, ts)) = (*self).maybe_ident_prefix() {
+    if let Some(Nonterminal::NtMeta(ref mi)) = self.maybe_interpolated_nonterminal() {
+      Some((**mi).clone())
+    } else if let Some((id, ts)) = self.maybe_ident_prefix() {
+      let sp = (*self).span;
       let name = intern_and_get_ident(&id.name.as_str()[..]);
       Some(Spanned { node : MetaItemKind { name : name
                                          , stream : ts }
                    , span : sp })
     } else { None }
   }
+
+  /// Returns a Nonterminal if it is Interpolated.
+  pub fn maybe_interpolated_nonterminal(&self) -> Option<Nonterminal> {
+    if !((*self).tts.len() == 1) { return None; }
+
+    match (*self).tts[0]
+    { TokenTree::Token(_,Token::Interpolated(ref nt)) => Some(nt.clone())
+    , _ => None
+    }
+  }
+
 
   /// Returns an identifier
   pub fn maybe_ident(&self) -> Option<ast::Ident> {
@@ -881,6 +898,8 @@ mod tests {
     let test4 = tts_to_ts(string_to_tts("(foo,bar,baz)(zab,rab)".to_string())).maybe_comma_list();
     let test5 = tts_to_ts(string_to_tts("(foo,bar,baz)foo".to_string())).maybe_comma_list();
     let test6 = tts_to_ts(string_to_tts("".to_string())).maybe_comma_list();
+    // THE FOLLOWING IS SUPPORTED BEHAVIOR! (It feels 'rusty' to me.)
+    let test7 = tts_to_ts(string_to_tts("(foo,bar,)".to_string())).maybe_comma_list(); 
 
     assert_eq!(test0, None);
 
@@ -913,6 +932,13 @@ mod tests {
     assert_eq!(test5, None);
 
     assert_eq!(test6, None);
+
+
+    let test7_expected : Vec<TokenStream> =
+      vec![ tts_to_ts(vec![TokenTree::Token(sp(1, 4), token::Ident(str_to_ident("foo")))])
+          , tts_to_ts(vec![TokenTree::Token(sp(5, 8), token::Ident(str_to_ident("bar")))]) 
+          ];
+    assert_eq!(test7, Some(test7_expected));
   }
 
  #[test]
