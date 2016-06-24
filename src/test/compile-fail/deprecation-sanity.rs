@@ -11,19 +11,19 @@
 // Various checks that deprecation attributes are used correctly
 
 mod bogus_attribute_types_1 {
-    #[deprecated(since = "a", note = "a", reason)] //~ ERROR unknown meta item 'reason'
+    #[deprecated(since = "a", note = "a", reason)] //~ ERROR incorrect attribute item 'reason', expected items 'since', 'note'
     fn f1() { }
 
-    #[deprecated(since = "a", note)] //~ ERROR incorrect meta item
+    #[deprecated(since = "a", note)] //~ ERROR incorrect attribute format for 'note', expected 'note = "value"'
     fn f2() { }
 
-    #[deprecated(since, note = "a")] //~ ERROR incorrect meta item
+    #[deprecated(since, note = "a")] //~ ERROR incorrect attribute format for 'since', expected 'since = "value"'
     fn f3() { }
 
-    #[deprecated(since = "a", note(b))] //~ ERROR incorrect meta item
+    #[deprecated(since = "a", note(b))] //~ ERROR incorrect attribute format for 'note', expected 'note = "value"'
     fn f5() { }
 
-    #[deprecated(since(b), note = "a")] //~ ERROR incorrect meta item
+    #[deprecated(since(b), note = "a")] //~ ERROR incorrect attribute format for 'since', expected 'since = "value"'
     fn f6() { }
 }
 
@@ -35,3 +35,4 @@ fn multiple1() { } //~ ERROR multiple deprecated attributes
 fn f1() { }
 
 fn main() { }
+

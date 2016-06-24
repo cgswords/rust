@@ -63,20 +63,44 @@ impl<'a> StripUnconfigured<'a> {
         let attr_list = match attr.meta_item_list() {
             Some(attr_list) => attr_list,
             None => {
-                let msg = "expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
+                let msg = "attribute body was not a valid list; expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
                 self.diag.diag.span_err(attr.span, msg);
                 return None;
             }
         };
-        
+
         let (cfg, mi) = match (attr_list.len(), attr_list.get(0), attr_list.get(1)) {
             (2, Some(cfg), Some(mi)) => (cfg, mi),
+            (_, Some(_), Some(_)) => {
+                let msg = "too many arguments in configuration; expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
+                self.diag.diag.span_err(attr.span, msg);
+                return None;
+            },
             _ => {
-                let msg = "expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
+                debug!("Failing attribute was: {:?}", attr);
+                debug!("As a list, it was: {:?}", attr_list);
+                let msg = "invalid configuration; expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
                 self.diag.diag.span_err(attr.span, msg);
                 return None;
             }
         };
+//
+//      let attr_list = match attr.meta_item_list() {
+//          Some(attr_list) => attr_list,
+//          None => {
+//              let msg = "expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
+//              return None;
+//          }
+//      };
+//      
+//      let (cfg, mi) = match (attr_list.len(), attr_list.get(0), attr_list.get(1)) {
+//          (2, Some(cfg), Some(mi)) => (cfg, mi),
+//          _ => {
+//              let msg = "expected `#[cfg_attr(<cfg pattern>, <attr>)]`";
+//              self.diag.diag.span_err(attr.span, msg);
+//              return None;
+//          }
+//      };
 
         if attr::cfg_matches(self.config, &cfg, &mut self.diag) {
           Some(attr::mk_spanned_attr(mi.span, attr::mk_attr_id(), mi.clone(), attr.node.style))

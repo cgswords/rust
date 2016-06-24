@@ -16,7 +16,7 @@ use syntax::ext::base::{ExtCtxt, SyntaxEnv, Annotatable};
 use syntax::ext::base::{MultiDecorator, MultiItemDecorator, MultiModifier};
 use syntax::ext::build::AstBuilder;
 use syntax::feature_gate;
-use syntax::codemap::{self, Span};
+use syntax::codemap::{self, Span, DUMMY_SP};
 use syntax::parse::token::{intern, intern_and_get_ident};
 use syntax::ptr::P;
 use syntax::tokenstream::TokenStream;
@@ -85,14 +85,22 @@ fn expand_derive(cx: &mut ExtCtxt,
     // debug!("expand_derive: annotatable input  = {:?}", annotatable);
     let annot = annotatable.map_item_or(|item| {
         item.map(|mut item| {
+            // This is gross and horrible. Why do I need to do it?
+
             if mitem.maybe_metaitem().and_then(|mi| mi.value_str()).is_some() {
-                cx.span_err(mitem.span, "unexpected value in `derive`");
+                cx.span_err(span, "unexpected value in `derive`");
             }
 
+            let malformed_derive = mitem.is_empty() || mitem.is_assignment();
+
+            if malformed_derive {
+                cx.span_warn(span, &format!("malformed `derive`, expected #[derive(...)]"));
+            }
 
             let traits = mitem.maybe_comma_list().unwrap_or(vec![]);
-            if traits.is_empty() {
-                cx.span_warn(mitem.span, &format!("empty trait list in `derive`; trait was: {:?}", mitem));
+            if traits.is_empty() && !malformed_derive {
+                // cx.span_warn(mitem.span, &format!("empty trait list in `derive`; trait was: {:?}", mitem));
+                cx.span_warn(mitem.span, &format!("empty trait list in `derive`, expected #[derive(...)]"));
             }
 
             let mut found_partial_eq = false;

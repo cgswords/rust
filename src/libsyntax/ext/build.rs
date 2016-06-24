@@ -1137,7 +1137,7 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
     // The value on the RHS better be a string!
     fn meta_name_value(&self, sp: Span, name: InternedString, value: ast::LitKind)
                        -> P<ast::MetaItem> {
-       let ts = TokenStream::from_ast_lit_str(dummy_spanned(value)); 
+       let ts = TokenStream::from_ast_lit_str(respan(sp, value)).respan(sp); 
        attr::mk_spanned_item_from_stream(sp, name, ts)
     }
 

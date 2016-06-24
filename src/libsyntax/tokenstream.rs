@@ -9,7 +9,7 @@
 // except according to those terms.
 
 use ast::{self, AttrStyle, LitKind, MetaItemKind};
-use codemap::{self, Span, mk_sp, Spanned, DUMMY_SP};
+use codemap::{self, Span, mk_sp, Spanned};
 use ext::base;
 use ext::tt::macro_parser;
 use parse::lexer::comments::{doc_comment_style, strip_doc_comment_decoration};
@@ -300,29 +300,41 @@ impl PartialEq<TokenStream> for TokenStream {
   }
 }
 
+// NB this will disregard gaps. if we have [a|{2,5} , b|{11,13}], the resultant span
+// will be at {2,13}. Without finer-grained span structures, however, this seems to be
+// our only recourse.
 pub fn compute_trees_span(trees : &[TokenTree]) -> Span {
+  // disregard any dummy spans we have
+  debug!("Spans before filtering: {:?}", trees);
+  let trees = trees.iter()
+                   .filter(|t| t.get_span() != codemap::DUMMY_SP)
+                   .collect::<Vec<&TokenTree>>();
+
+  debug!("Spans after filtering: {:?}", trees);
+
+  // if we're out of spans, stop
   if trees.len() < 1 { return codemap::DUMMY_SP; }
+  
+  // set up the initial values
+  let fst_span = trees[0].get_span();
 
-  let mut lo_span;
-  let mut hi_span;
-  // TODO Fix this: a dummy span, as it is, will dominate the lower end.
-  // Instead, we should strip dummy spans before doing this computation.
-  match trees[0]
-    { TokenTree::Token(sp, _) | TokenTree::Delimited(sp, _) | TokenTree::Sequence(sp, _) => 
-      { lo_span = sp.lo; hi_span = sp.hi; }
-    }
+  let mut lo_span = fst_span.lo;
+  let mut hi_span = fst_span.hi;
 
-  for tt in trees.iter().skip(1) {
-    let loc_lo;
-    let loc_hi;
-    match *tt
-      { TokenTree::Token(sp, _) | TokenTree::Delimited(sp, _) | TokenTree::Sequence(sp, _) => 
-        { loc_lo = sp.lo; loc_hi = sp.hi; }
-      }
-    if loc_lo  < lo_span { lo_span = loc_lo; }
-    if hi_span < loc_hi  { hi_span = loc_hi; }
-  }
+  // compute the spans iteratively
+  trees.iter().skip(1).map(|t| { let sp = t.get_span();
+                                 if sp.lo  < lo_span { 
+                                   lo_span = sp.lo; 
+                                 }
+                                 if hi_span < sp.hi { 
+                                   hi_span = sp.hi; 
+                                 }
+                               }
+                           ).count(); // because there isn't a dummy consumer
+                                      // and hopefully this is better than 
+                                      // building a vector
 
+  debug!("Final span: {:?}--{:?}", lo_span, hi_span);
   codemap::mk_sp(lo_span, hi_span)
 }
 
@@ -333,13 +345,19 @@ pub fn tts_to_ts (trees : Vec<TokenTree>) -> TokenStream {
   TokenStream { tts : trees, span : span }
 }
 
+/// Convert a vector of `TokenTree`s and a `Span` into a `TokenStream`.
+#[inline(always)]
+pub fn tts_sp_to_ts (trees : Vec<TokenTree>, span : Span) -> TokenStream {
+  TokenStream { tts : trees, span : span }
+}
+
 #[inline]
 pub fn append_streams (ts1 : TokenStream, ts2 : TokenStream) -> TokenStream {
   let mut tts1 = ts1.tts;
   let mut tts2 = ts2.tts;
   tts1.append(&mut tts2);
 
-  let span = DUMMY_SP; // What _should_ we do here?
+  let span = compute_trees_span(&tts1); // What _should_ we do here?
 
   TokenStream { tts : tts1, span : span }
 }
@@ -351,7 +369,7 @@ pub fn cons_tt_ts (tt : TokenTree, ts : TokenStream) -> TokenStream {
   let mut tts2 = ts.tts;
   tts.append(&mut tts2);
 
-  let span = DUMMY_SP; // What _should_ we do here?
+  let span = compute_trees_span(&tts); // What _should_ we do here?
 
   TokenStream { tts : tts, span : span }
 }
@@ -375,6 +393,10 @@ pub fn ts_to_tts(stream : TokenStream) -> Vec<TokenTree> {
 ///    `maybe_path_prefix("a::b::c(a,b,c).foo()") -> (a::b::c, "(a,b,c).foo()")`
 impl TokenStream {
 
+  pub fn respan(self, span : Span) -> TokenStream {
+    TokenStream { tts : self.tts, span : span }
+  }
+
   pub fn get_tts(&self) -> &[TokenTree] {
     &self.tts[..] 
   }
@@ -394,16 +416,16 @@ impl TokenStream {
     let new_sp = compute_trees_span(&tts);
 
     let new_rc = Rc::new(Delimited { delim : token::DelimToken::Paren
-                                   , open_span : DUMMY_SP
+                                   , open_span : mk_sp(new_sp.lo,new_sp.lo)
                                    , tts : tts
-                                   , close_span : DUMMY_SP
+                                   , close_span :  mk_sp(new_sp.hi,new_sp.hi)
                                    });
 
     tts_to_ts(vec![TokenTree::Delimited(new_sp, new_rc)])  
   }
 
-  pub fn from_interned_string_as_ident(s : InternedString) -> TokenStream {
-    tts_to_ts(vec![TokenTree::Token(DUMMY_SP,Token::Ident(token::str_to_ident(&s[..])))])
+  pub fn from_spanned_interned_string_as_ident(sp : Span, s : InternedString) -> TokenStream {
+    tts_to_ts(vec![TokenTree::Token(sp, Token::Ident(token::str_to_ident(&s[..])))])
   }
 
   pub fn to_trees(&self) -> Vec<TokenTree> { self.tts.clone() }
@@ -529,10 +551,10 @@ impl TokenStream {
     let mut current_ts : Vec<TokenTree>   = Vec::new();
 
     while ts.len() > 0 {
-      let fst_tt = ts.pop();
-      match fst_tt
+      let tt = ts.pop();
+      match tt
         { Some(TokenTree::Token(_, Token::Comma)) => {
-            if ts.len() == 1 && ts[0].len() == 0 {
+            if ts.len() == 0 {
               break; // support (a,b,c,) as [a,b,c]
             } else {
               res.push(tts_to_ts(current_ts));
@@ -543,7 +565,11 @@ impl TokenStream {
         , None    => {} // How did we get here?
         }
     }
-    res.push(tts_to_ts(current_ts));
+
+    // push the last bit
+    if current_ts.len() > 0 { 
+      res.push(tts_to_ts(current_ts));
+    }
 
     Some(res)
   }

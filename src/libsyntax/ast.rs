@@ -15,7 +15,7 @@ pub use self::UnsafeSource::*;
 pub use self::ViewPath_::*;
 pub use self::PathParameters::*;
 
-use attr::{ThinAttributes, HasAttrs};
+use attr::{ThinAttributes, HasAttrs, AttrMetaMethods};
 use codemap::{mk_sp, respan, Span, Spanned, DUMMY_SP, ExpnId, dummy_spanned};
 use abi::Abi;
 use errors;
@@ -24,7 +24,7 @@ use parse::token::{self, keywords, InternedString, Token};
 use parse::token::Lit as PLit;
 use print::pprust;
 use ptr::P;
-use tokenstream::{TokenTree, TokenStream, tts_to_ts, ts_to_tts};
+use tokenstream::{TokenTree, TokenStream, tts_to_ts, tts_sp_to_ts, ts_to_tts};
 
 use std::fmt;
 use std::rc::Rc;
@@ -573,16 +573,16 @@ impl Attribute {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
             PLit::Str_(name) => {
-              // TODO Consider rewriting this with maybe_str_ast_lit
-              let lit = dummy_spanned(LitKind::Str(token::InternedString::new_from_name(name),
-                                      StrStyle::Cooked));
+              // TODO this span is wrong, but it's all I've got.
+              let lit = respan(span, LitKind::Str(token::InternedString::new_from_name(name),
+                                                  StrStyle::Cooked));
               Some(Spanned { node : ReifiedAttr_::Assign(id, path, lit), span : span})
             }
             PLit::StrRaw(s,n) => {
-              let lit = dummy_spanned(LitKind::Str(
-                                        token::intern_and_get_ident(
-                                          &parse::raw_str_lit(&s.as_str())),
-                                        StrStyle::Raw(n)));
+              // TODO this span is wrong, but it's all I've got.
+              let lit = respan(span, LitKind::Str(token::intern_and_get_ident(
+                                                   &parse::raw_str_lit(&s.as_str())),
+                                                   StrStyle::Raw(n)));
               Some(Spanned { node : ReifiedAttr_::Assign(id, path, lit), span : span})
             }
             _ => None,
@@ -641,16 +641,18 @@ impl ReifiedAttr {
   
   pub fn recover_tokenstream(&self) -> TokenStream {
     match (&self).node {
-      ReifiedAttr_::Word(_,_) => tts_to_ts(vec![]),
+      ReifiedAttr_::Word(_,_) => tts_sp_to_ts(vec![], self.span),
       ReifiedAttr_::Assign(_,_,ref l) => TokenStream::from_ast_lit_str(l.clone()),
       ReifiedAttr_::List(_,_,ref ls) => {
-        if ls.len() == 0 { return tts_to_ts(vec![]) }
+        if ls.len() == 0 { return tts_sp_to_ts(vec![], self.span) }
 
         let mut tts = Vec::new();
         let mut ls = ls.clone();
         tts.append(&mut ls[0].to_tts());
         for l in ls.iter().skip(1) {
-          tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+          let sp = l.span();
+          // this is the best we can do; dummy spans are _not_ what I want
+          tts.push(TokenTree::Token(mk_sp(sp.lo,sp.lo), Token::Comma));
           let mut ttset = l.to_tts();
           tts.append(&mut ttset);
         }
@@ -701,7 +703,7 @@ impl MetaItem {
         if let Some(lit) = rhs.maybe_lit() {
           match lit {
             PLit::Str_(arg) => {
-              let lit = dummy_spanned(LitKind::Str(token::InternedString::new_from_name(arg), StrStyle::Cooked));
+              let lit = respan(span, LitKind::Str(token::InternedString::new_from_name(arg), StrStyle::Cooked));
               Some(Spanned { node : ReifiedMetaItem_::Assign(name, lit), span : span})
             }
             _ => None,
@@ -738,7 +740,9 @@ impl MetaItem {
   }
 
   pub fn to_tts(&self) -> Vec<TokenTree> {
-    let mut tts = ts_to_tts(TokenStream::from_interned_string_as_ident(self.node.name.clone()));
+    let mut tts = ts_to_tts(
+                    TokenStream::from_spanned_interned_string_as_ident(self.span,
+                                                                       self.node.name.clone()));
     let mut stream_tokens = self.node.stream.to_trees();
     tts.append(&mut stream_tokens);
     tts
@@ -778,31 +782,35 @@ impl ReifiedMetaItem {
   
   pub fn recover_tokenstream(&self) -> TokenStream {
     match (&self).node {
-      ReifiedMetaItem_::Word(_) => tts_to_ts(vec![]),
+      ReifiedMetaItem_::Word(_) => tts_sp_to_ts(vec![], self.span),
       ReifiedMetaItem_::Assign(_, ref l) => TokenStream::from_ast_lit_str(l.clone()),
-      ReifiedMetaItem_::List(_, ref ls) => ReifiedMetaItem::recover_vec_tokenstream(ls.clone())
+      ReifiedMetaItem_::List(_, ref ls) => ReifiedMetaItem::recover_vec_tokenstream(ls.clone(), self.span)
     }
   }
 
-  pub fn recover_vec_ptr_tokenstream(ls : Vec<P<MetaItem>>) -> TokenStream {
-    if ls.len() == 0 { return tts_to_ts(vec![]) }
+  pub fn recover_vec_ptr_tokenstream(ls : Vec<P<MetaItem>>, span : Span) -> TokenStream {
+    if ls.len() == 0 { return tts_sp_to_ts(vec![], span) }
 
     let mut tts = Vec::new();
     tts.append(&mut (&ls[0]).to_tts());
     for l in ls.iter().skip(1) {
-      tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+      let sp = l.span();
+      // this is the best we can do; dummy spans are _not_ what I want
+      tts.push(TokenTree::Token(mk_sp(sp.lo,sp.lo), Token::Comma));
       tts.append(&mut (&l).to_tts());
     }
     TokenStream::as_paren_delimited_stream(tts)
   }
 
-  pub fn recover_vec_tokenstream(mut ls : Vec<MetaItem>) -> TokenStream {
-    if ls.len() == 0 { return tts_to_ts(vec![]) }
+  pub fn recover_vec_tokenstream(mut ls : Vec<MetaItem>, span : Span) -> TokenStream {
+    if ls.len() == 0 { return tts_sp_to_ts(vec![], span) }
 
     let mut tts = Vec::new();
     tts.append(&mut ls[0].to_tts());
     for l in ls.iter().skip(1) {
-      tts.push(TokenTree::Token(DUMMY_SP, Token::Comma));
+      let sp = l.span();
+      // this is the best we can do; dummy spans are _not_ what I want
+      tts.push(TokenTree::Token(mk_sp(sp.lo,sp.lo), Token::Comma));
       tts.append(&mut l.to_tts());
     }
     TokenStream::as_paren_delimited_stream(tts)

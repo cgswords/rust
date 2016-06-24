@@ -19,7 +19,7 @@ use ast::{AttrId, Attribute, Attribute_, ReifiedAttr, ReifiedAttr_};
 use ast::{MetaItem, MetaItemKind, ReifiedMetaItem, ReifiedMetaItem_, reify_metaitem_list};
 use ast::{Stmt, StmtKind, DeclKind};
 use ast::{Expr, Item, Local, Decl};
-use codemap::{Span, Spanned, spanned, dummy_spanned, mk_sp, DUMMY_SP};
+use codemap::{Span, Spanned, respan, spanned, dummy_spanned, mk_sp, DUMMY_SP};
 use codemap::BytePos;
 use config::CfgDiag;
 use errors::Handler;
@@ -481,44 +481,42 @@ pub fn mk_name_value_item_str(name: InternedString, value: InternedString)
                                }))
 }
 
-// pub fn mk_name_value_item(name: InternedString, value: ast::Lit)
-//                           -> P<MetaItem> {
-//     P(dummy_spanned(MetaItemKind::NameValue(name, value)))
-// }
-
 pub fn mk_unpointered_list_item(name: InternedString, items: Vec<MetaItem>) -> P<MetaItem> {
+  debug!("List attribute to dummy span: {:?}", name);
   P(dummy_spanned(MetaItemKind { name : name
-                               , stream : ReifiedMetaItem::recover_vec_tokenstream(items) }))
+                               , stream : ReifiedMetaItem::recover_vec_tokenstream(items, DUMMY_SP) }))
 }
 
 pub fn mk_list_item(name: InternedString, items: Vec<P<MetaItem>>) -> P<MetaItem> {
+  debug!("List attribute to dummy span: {:?}", name);
   P(dummy_spanned(MetaItemKind { name : name
-                               , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items) }))
+                               , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items, DUMMY_SP) }))
 }
 
 pub fn mk_word_item(name: InternedString) -> P<MetaItem> {
+  debug!("Word attribute to dummy span: {:?}", name);
   P(dummy_spanned(MetaItemKind { name : name
                                , stream : tokenstream::tts_to_ts(vec![])
                                }))
 }
 
 pub fn mk_spanned_word_item(span : Span, name: InternedString) -> P<MetaItem> {
-  P(Spanned { node : MetaItemKind { name : name , stream : tokenstream::tts_to_ts(vec![]) }
-            , span : span})
+  debug!("Spanned word attribute {:?} with span {:?}", name, span);
+  P(respan(span, MetaItemKind { name : name , stream : tokenstream::tts_sp_to_ts(vec![], span) }))
 }
 
 pub fn mk_spanned_list_item(span : Span, name: InternedString, items: Vec<P<MetaItem>>) 
                             -> P<MetaItem> {
-  P(Spanned { node : MetaItemKind { name : name
-                                   , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items) }
-            , span : span})
+  debug!("Spanned list attribute {:?} with span {:?}", name, span);
+  P(respan(span, MetaItemKind { name : name
+                              , stream : ReifiedMetaItem::recover_vec_ptr_tokenstream(items, span) }))
 }
 
 pub fn mk_spanned_item_from_stream(span : Span, name: InternedString, 
                                                 stream : tokenstream::TokenStream) 
                                                 -> P<MetaItem> {
-  P(Spanned { node : MetaItemKind { name : name , stream : stream }
-            , span : span})
+  debug!("Spanned stream attribute {:?} with span {:?}", name, span);
+  P(respan(span, MetaItemKind { name : name , stream : stream }))
 }
 
 
@@ -559,6 +557,7 @@ pub fn mk_doc_attr_outer(id: AttrId, item: P<MetaItem>, doc: bool) -> Attribute 
 pub fn mk_attr(id: AttrId, item: P<MetaItem>, style : ast::AttrStyle) -> Attribute {
   debug!("Making attribute");
   debug!("  item: {:?}", item);
+  debug!("  span: {:?}", DUMMY_SP);
     dummy_spanned(Attribute_ {
         id: id,
         style: style,
@@ -573,11 +572,12 @@ pub fn mk_spanned_attr(span : Span, id: AttrId, item: P<MetaItem>, style : ast::
                        -> Attribute {
   debug!("Making spanned attribute");
   debug!("  item: {:?}", item);
+  debug!("  span: {:?}", span);
     Spanned { node : Attribute_ {
                        id: id,
                        style: style,
                        path : ast::Path::from_ident((&item).span, str_to_ident(&(*item).name()[..])),  
-                       stream: item.node.stream.clone(),
+                       stream: item.node.stream.clone().respan(span),
                        is_sugared_doc: false}
             , span : span}
 }
@@ -806,6 +806,7 @@ pub fn cfg_matches<T: CfgDiag>(cfgs: &[P<MetaItem>],
                            cfg: &ast::MetaItem,
                            diag: &mut T) -> bool {
   debug!("Parsing config with name: {:?}", cfg.name());
+  debug!(" span: {:?}", cfg.span());
   if cfg.is_list() {
     debug!("Treating configuration as list");
     let name = cfg.name();
@@ -1029,6 +1030,8 @@ fn find_stability_generic<'a, I>(diagnostic: &Handler,
     stab
 }
 
+// Bizarrely, `deprecation` can either have arguments
+// or not, but `rustc_deprecation` must.
 fn find_deprecation_generic<'a, I>(diagnostic: &Handler,
                                    attrs_iter: I,
                                    item_sp: Span)
@@ -1037,19 +1040,24 @@ fn find_deprecation_generic<'a, I>(diagnostic: &Handler,
 {
   let mut depr: Option<Deprecation> = None;
 
+  debug!("Looking for deprecated tags");
   'outer: for attr in attrs_iter {
+    debug!("Inspecting attribute: {:?}", attr);
     if attr.name() != "deprecated" {
         continue
     }
-
     let rattr = attr.to_reified_attr();
+    debug!("Reified the attribute: {:?}", rattr);
+
     if rattr.is_none() {
         diagnostic.span_err(attr.span(), &format!("invalid attribute '{:?}'", attr));
         continue 'outer
     }
+
     let attr = rattr.unwrap();
     mark_reified_used(&attr);
 
+    debug!("Using attribute! {:?}", attr);
     if depr.is_some() {
         diagnostic.span_err(item_sp, "multiple deprecated attributes");
         break
@@ -1070,6 +1078,8 @@ fn find_deprecation_generic<'a, I>(diagnostic: &Handler,
       } else { // to_assign_map has already produced the necessary diagnostic information
         continue 'outer
       }
+    } else {
+      depr = Some(Deprecation {since : None, note : None});
     }
   }  
   depr

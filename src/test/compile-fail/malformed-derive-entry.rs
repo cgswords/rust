@@ -17,9 +17,9 @@ struct Test1;
 struct Test2;
 
 #[derive()]
-//~^ WARNING empty trait list
+//~^ WARNING empty trait list in `derive`, expected #[derive(...)]
 struct Test3;
 
 #[derive]
-//~^ WARNING empty trait list
+//~^ WARNING malformed `derive`, expected #[derive(...)]
 struct Test4;
